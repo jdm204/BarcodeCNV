@@ -93,7 +93,7 @@ stage=$(mktemp -d)
 git archive v0.1.0 | tar -x -C "$stage"
 mkdir -p "$stage/conda"
 cp conda/meta.yaml "$stage/conda/meta.yaml"
-CONDA_CHANNEL_PRIORITY=strict conda build "$stage/conda" \
+CONDA_CHANNEL_PRIORITY=strict conda-build "$stage/conda" \
   --override-channels -c conda-forge -c bioconda --no-anaconda-upload
 ```
 
