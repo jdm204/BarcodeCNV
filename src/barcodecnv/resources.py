@@ -376,21 +376,55 @@ def resolve_expression_panel(value, config=None):
     return path
 
 
-def setup(args):
-    root = (args.resource_dir or cache_root()).expanduser().resolve() / "hg38"
-    if args.dry_run:
+def setup(
+    *,
+    resource_dir=None,
+    genome="hg38",
+    chromosomes=CHROMOSOMES,
+    tools="managed",
+    expression_panel="b-cells-v1",
+    dry_run=False,
+):
+    """Provision resources and return the config Path; dry_run only prints a plan.
+
+    Chromosomes may be an iterable of names or a comma-separated string.
+    Completed resources are checksum-verified and reused. Failures raise.
+    """
+    if genome != "hg38":
+        raise ValueError("setup currently supports hg38 only")
+    if tools not in ("managed", "path"):
+        raise ValueError("tools must be managed or path")
+    if expression_panel not in EXPRESSION_PANELS:
+        raise ValueError("unknown expression panel")
+    chromosome_values = (
+        chromosomes.split(",") if isinstance(chromosomes, str) else chromosomes
+    )
+    chromosome_values = tuple(
+        str(c).strip().removeprefix("chr") for c in chromosome_values
+    )
+    if (
+        not chromosome_values
+        or len(set(chromosome_values)) != len(chromosome_values)
+        or not set(chromosome_values) <= set(CHROMOSOMES)
+    ):
+        raise ValueError("chromosomes must be unique and drawn from 1..22,X")
+    chromosomes = tuple(c for c in CHROMOSOMES if c in chromosome_values)
+    tool_mode = tools
+    resource_dir = Path(resource_dir) if resource_dir is not None else None
+    root = (resource_dir or cache_root()).expanduser().resolve() / "hg38"
+    if dry_run:
         print(
             json.dumps(
                 dict(
                     genome="hg38",
                     destination=str(root),
-                    tools=args.tools,
+                    tools=tool_mode,
                     tool_packages=TOOL_SPECS,
                     assets=ASSETS,
-                    panels={c: panel_url(c) for c in args.chromosomes},
+                    panels={c: panel_url(c) for c in chromosomes},
                     expression_panel=None
-                    if not args.expression_panel
-                    else EXPRESSION_PANELS[args.expression_panel],
+                    if not expression_panel
+                    else EXPRESSION_PANELS[expression_panel],
                 ),
                 indent=2,
             )
@@ -401,12 +435,12 @@ def setup(args):
         state = dict(
             genome="hg38",
             status="running",
-            chromosomes=args.chromosomes,
-            tools=args.tools,
+            chromosomes=chromosomes,
+            tools=tool_mode,
         )
         write_json(status, state)
         try:
-            tools, versions = ensure_tools(root, args.tools)
+            tools, versions = ensure_tools(root, tool_mode)
             LOG.info("[setup] Downloading hg38 annotation, SNP sites, maps and Beagle")
             paths = {
                 key: download(url, root / filename, sha256=sha)
@@ -414,18 +448,18 @@ def setup(args):
             }
             paths["genetic_map"] = ensure_maps(paths.pop("maps"), root)
             converter = paths.pop("bref3_jar")
-            for chrom in args.chromosomes:
+            for chrom in chromosomes:
                 ensure_panel(root, chrom, tools, converter)
             paths["phasing_panel"] = root / "1kGP_HC"
             expression = {}
-            if args.expression_panel:
-                expression[args.expression_panel] = str(
-                    ensure_expression_panel(root, args.expression_panel)
+            if expression_panel:
+                expression[expression_panel] = str(
+                    ensure_expression_panel(root, expression_panel)
                 )
             config = root / "config.json"
             previous = json.loads(config.read_text()) if config.exists() else {}
             expression = {**previous.get("expression_panels", {}), **expression}
-            available = set(previous.get("chromosomes", [])) | set(args.chromosomes)
+            available = set(previous.get("chromosomes", [])) | set(chromosomes)
             # Revalidate all advertised chromosome resources, including earlier subsets.
             from .preprocessing import resolve_resource
 

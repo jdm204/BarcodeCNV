@@ -18,7 +18,7 @@ from pathlib import Path
 from .bundle import write_bundle
 from .loading import chromosome, chromosome_key, load_cells, table
 from .preprocessing_io import export_alleles, phased_sites, pooled_vcf, vcf_records
-from .reference import add_reference_arguments, fit_for_args, write_fit
+from .reference import add_reference_arguments, fit_from_files, write_fit
 
 LOG = logging.getLogger(__name__)
 
@@ -188,51 +188,113 @@ def discover_config(explicit=None):
     return None
 
 
-def preprocess(args, *, inference_out=None):
+def preprocess(
+    *,
+    outs,
+    cells,
+    out,
+    reference=None,
+    reference_panel=None,
+    config=None,
+    genes=None,
+    snp_vcf=None,
+    genetic_map=None,
+    phasing_panel=None,
+    beagle_jar=None,
+    genome="hg38",
+    chromosomes=None,
+    threads=8,
+    memory_gb=12,
+    seed=42,
+    cellsnp_dir=None,
+    phased_vcf=None,
+    reference_method="global",
+    reference_min_cpm=2.0,
+    reference_iterations=2000,
+    reference_bin_genes=200,
+    inference_out=None,
+):
+    """Preprocess one donor's Cell Ranger outputs; return the prepared bundle Path.
+
+    Paths accept strings or Path objects. Resources are discovered from config;
+    explicit resource arguments take precedence. Reference and reference_panel
+    are alternatives. Existing output directories are never overwritten.
+    """
+    arguments = dict(locals())
+    if genome != "hg38":
+        raise ValueError("preprocessing currently supports hg38 only")
+    if reference is not None and reference_panel is not None:
+        raise ValueError("use either reference or reference_panel, not both")
+    if any(not isinstance(v, int) or v < 1 for v in (threads, memory_gb)):
+        raise ValueError("threads and memory_gb must be positive integers")
+    if not isinstance(seed, int) or seed < 0:
+        raise ValueError("seed must be a nonnegative integer")
+    outs, cells, out = Path(outs), Path(cells), Path(out)
+    reference = Path(reference) if reference is not None else None
+    cellsnp_dir = Path(cellsnp_dir) if cellsnp_dir is not None else None
+    phased_vcf = Path(phased_vcf) if phased_vcf is not None else None
     LOG.info("[preprocess 1/5] Validating inputs and resolving tools/resources")
-    args.config = discover_config(args.config)
-    config = json.loads(args.config.read_text()) if args.config else {}
-    if config.get("genome", args.genome) != args.genome:
-        raise ValueError("configured resource build differs from --genome")
-    resources = config.get("resources", {})
-    for key in ("genes", "snp_vcf", "genetic_map", "phasing_panel", "beagle_jar"):
-        value = getattr(args, key) or resources.get(key)
-        setattr(args, key, Path(value).resolve() if value else None)
-    if args.reference is None and args.reference_panel is None:
-        args.reference_panel = Path(config.get("default_reference_panel", "b-cells-v1"))
-        LOG.info("Using default B-cell expression panel: %s", args.reference_panel)
-    if args.chromosomes is None:
-        args.chromosomes = ",".join(
-            config.get("chromosomes", [*map(str, range(1, 23)), "X"])
-        )
-    chroms = [chromosome(x.strip()) for x in args.chromosomes.split(",")]
+    config_path = discover_config(config)
+    settings = json.loads(config_path.read_text()) if config_path else {}
+    if settings.get("genome", genome) != genome:
+        raise ValueError("configured resource build differs from genome")
+    resources = settings.get("resources", {})
+    resolved = {
+        key: Path(value or resources[key]).resolve()
+        if value or resources.get(key)
+        else None
+        for key, value in dict(
+            genes=genes,
+            snp_vcf=snp_vcf,
+            genetic_map=genetic_map,
+            phasing_panel=phasing_panel,
+            beagle_jar=beagle_jar,
+        ).items()
+    }
+    genes, snp_vcf, genetic_map, phasing_panel, beagle_jar = resolved.values()
+    if reference is None and reference_panel is None:
+        reference_panel = settings.get("default_reference_panel", "b-cells-v1")
+        LOG.info("Using default B-cell expression panel: %s", reference_panel)
+    if reference_panel is not None:
+        from .resources import resolve_expression_panel
+
+        reference_panel = resolve_expression_panel(reference_panel, config_path)
+    if chromosomes is None:
+        chromosomes = settings.get("chromosomes", [*map(str, range(1, 23)), "X"])
+    if isinstance(chromosomes, str):
+        chromosomes = chromosomes.split(",")
+    chroms = [chromosome(str(x).strip()) for x in chromosomes]
     supported = {f"chr{i}" for i in range(1, 23)} | {"chrX"}
-    if len(set(chroms)) != len(chroms) or not set(chroms) <= supported:
+    if not chroms or len(set(chroms)) != len(chroms) or not set(chroms) <= supported:
         raise ValueError("chromosomes must be unique and drawn from 1..22,X")
     chroms.sort(key=chromosome_key)
     LOG.info("Allele chromosomes: %s", ",".join(chroms))
     required = ["genes", "genetic_map"]
-    if not args.cellsnp_dir:
+    if not cellsnp_dir:
         required.append("snp_vcf")
-    if not args.phased_vcf:
+    if not phased_vcf:
         required += ["phasing_panel", "beagle_jar"]
     for key in required:
-        if getattr(args, key) is None or not getattr(args, key).exists():
-            raise ValueError(
-                f"provide --{key.replace('_', '-')} or run barcodecnv setup --genome hg38"
-            )
+        if resolved[key] is None or not resolved[key].exists():
+            raise ValueError(f"provide {key} or run barcodecnv setup --genome hg38")
+    arguments.update(
+        resolved,
+        config=config_path,
+        reference_panel=reference_panel,
+        chromosomes=chroms,
+    )
     # Validate every requested chromosome before expensive pileup, even if no sites survive.
-    maps = {c: resolve_resource(args.genetic_map, c, "map") for c in chroms}
+    maps = {c: resolve_resource(genetic_map, c, "map") for c in chroms}
     panels = (
         {}
-        if args.phased_vcf
-        else {c: resolve_resource(args.phasing_panel, c, "panel") for c in chroms}
+        if phased_vcf
+        else {c: resolve_resource(phasing_panel, c, "panel") for c in chroms}
     )
-    matrix = args.outs / "filtered_feature_bc_matrix.h5"
+    matrix = outs / "filtered_feature_bc_matrix.h5"
     if not matrix.is_file():
-        matrix = args.outs / "filtered_feature_bc_matrix"
-    bam = args.outs / "possorted_genome_bam.bam"
-    if not args.cellsnp_dir:
+        matrix = outs / "filtered_feature_bc_matrix"
+    bam = outs / "possorted_genome_bam.bam"
+    if not cellsnp_dir:
         if not bam.is_file() or not any(
             p.is_file()
             for p in (
@@ -244,20 +306,34 @@ def preprocess(args, *, inference_out=None):
             raise ValueError(
                 "Cell Ranger outs must contain an indexed possorted_genome_bam.bam"
             )
-    if args.phased_vcf:
-        phased_sites(args.phased_vcf)
-    labels = table(args.cells).rename(
+    if phased_vcf:
+        phased_sites(phased_vcf)
+    labels = table(cells).rename(
         columns={"cell_barcode": "cell", "lineage_barcode": "barcode"}
     )
     # Use the production loader for input validation, including cells in 10x and library sizes.
-    if args.out.exists():
-        raise FileExistsError(f"output directory already exists: {args.out}")
-    fitted_reference = fit_for_args(args, matrix)
-    reference_profile = fitted_reference.profile if fitted_reference else args.reference
+    if out.exists():
+        raise FileExistsError(f"output directory already exists: {out}")
+    fitted_reference = (
+        fit_from_files(
+            matrix,
+            cells,
+            genes,
+            reference_panel,
+            genome=genome,
+            method=reference_method,
+            min_cpm=reference_min_cpm,
+            max_iter=reference_iterations,
+            bin_genes=reference_bin_genes,
+        )
+        if reference_panel is not None
+        else None
+    )
+    reference_profile = fitted_reference.profile if fitted_reference else reference
     initial = load_cells(
         matrix,
-        args.cells,
-        args.genes,
+        cells,
+        genes,
         reference=reference_profile,
     )
     if not len(initial.cell_ids):
@@ -266,40 +342,40 @@ def preprocess(args, *, inference_out=None):
     if labels[["cell", "barcode"]].eq("").any().any():
         raise ValueError("cell and barcode labels must be nonempty")
     tools = {}
-    needed = (["cellsnp-lite", "bcftools"] if not args.cellsnp_dir else []) + (
-        [] if args.phased_vcf else ["bcftools", "java"]
+    needed = (["cellsnp-lite", "bcftools"] if not cellsnp_dir else []) + (
+        [] if phased_vcf else ["bcftools", "java"]
     )
     for name in set(needed):
-        executable = config.get("tools", {}).get(name) or shutil.which(name)
+        executable = settings.get("tools", {}).get(name) or shutil.which(name)
         if not executable or not os.access(executable, os.X_OK):
             raise ValueError(
                 f"{name} unavailable; configure preprocessing tools or add to PATH"
             )
         tools[name] = str(Path(executable).absolute())
-    out = args.out.resolve()
+    out = out.resolve()
     out.mkdir(parents=True, exist_ok=False)
     run = Commands(tools, out)
     status = dict(
         status="running",
-        genome=args.genome,
+        genome=genome,
         chromosomes=chroms,
         arguments={
-            k: str(v) if isinstance(v, Path) else v for k, v in vars(args).items()
+            k: str(v) if isinstance(v, Path) else v for k, v in arguments.items()
         },
         tools={k: provenance(v, digest=True) for k, v in tools.items()},
         inputs={
             k: provenance(v, digest=k in ("cells", "reference", "beagle_jar"))
             for k, v in dict(
-                cells=args.cells,
-                genes=args.genes,
+                cells=cells,
+                genes=genes,
                 matrix=matrix,
                 **(
-                    {"reference": args.reference}
-                    if args.reference
-                    else {"reference_panel": args.reference_panel}
+                    {"reference": reference}
+                    if reference
+                    else {"reference_panel": reference_panel}
                 ),
-                **({"bam": bam} if not args.cellsnp_dir else {}),
-                **({"beagle_jar": args.beagle_jar} if not args.phased_vcf else {}),
+                **({"bam": bam} if not cellsnp_dir else {}),
+                **({"beagle_jar": beagle_jar} if not phased_vcf else {}),
             ).items()
         },
         commands=run.history,
@@ -313,12 +389,12 @@ def preprocess(args, *, inference_out=None):
             status["reference_fit"] = str(out / "reference_fit")
         labels[["cell", "barcode"]].to_csv(out / "cells.tsv", sep="\t", index=False)
         (out / "cell_barcodes.txt").write_text("\n".join(labels.cell) + "\n")
-        cellsnp = args.cellsnp_dir.resolve() if args.cellsnp_dir else out / "cellsnp"
+        cellsnp = cellsnp_dir.resolve() if cellsnp_dir else out / "cellsnp"
         LOG.info(
             "[preprocess 2/5] %s per-cell allele counts",
-            "Reusing" if args.cellsnp_dir else "Counting",
+            "Reusing" if cellsnp_dir else "Counting",
         )
-        if not args.cellsnp_dir:
+        if not cellsnp_dir:
             # Restrict the catalogue too, making chromosome-specific smoke tests inexpensive.
             sites = out / "sites.vcf.gz"
             targets = ",".join(chroms + [c.removeprefix("chr") for c in chroms])
@@ -334,7 +410,7 @@ def preprocess(args, *, inference_out=None):
                 "-Oz",
                 "-o",
                 sites,
-                args.snp_vcf,
+                snp_vcf,
             )
             cellsnp.mkdir()
             run(
@@ -348,7 +424,7 @@ def preprocess(args, *, inference_out=None):
                 "-R",
                 sites,
                 "-p",
-                args.threads,
+                threads,
                 "--minMAF",
                 "0",
                 "--minCOUNT",
@@ -360,12 +436,12 @@ def preprocess(args, *, inference_out=None):
                 "UB",
             )
             # No --genotype: only the AD/DP matrices are consumed. Donor genotypes are pooled below.
-        phased = args.phased_vcf.resolve() if args.phased_vcf else out / "phased.vcf.gz"
+        phased = phased_vcf.resolve() if phased_vcf else out / "phased.vcf.gz"
         LOG.info(
             "[preprocess 3/5] %s donor haplotypes",
-            "Reusing" if args.phased_vcf else "Phasing",
+            "Reusing" if phased_vcf else "Phasing",
         )
-        if not args.phased_vcf:
+        if not phased_vcf:
             present, n = pooled_vcf(
                 cellsnp / "cellSNP.base.vcf.gz", out / "pooled.vcf", set(chroms)
             )
@@ -388,17 +464,17 @@ def preprocess(args, *, inference_out=None):
                 prefix = out / chrom
                 run(
                     "java",
-                    f"-Xmx{args.memory_gb}g",
+                    f"-Xmx{memory_gb}g",
                     "-jar",
-                    args.beagle_jar,
+                    beagle_jar,
                     f"gt={out / 'pooled.vcf.gz'}",
                     f"map={maps[chrom]}",
                     f"ref={panels[chrom]}",
                     f"out={prefix}",
                     "impute=false",
                     f"chrom={chrom}",
-                    f"nthreads={args.threads}",
-                    f"seed={args.seed}",
+                    f"nthreads={threads}",
+                    f"seed={seed}",
                 )
                 product = Path(str(prefix) + ".vcf.gz")
                 seen = {chromosome(row[0]) for row in vcf_records(product)}
@@ -419,10 +495,10 @@ def preprocess(args, *, inference_out=None):
         data = load_cells(
             matrix,
             out / "cells.tsv",
-            args.genes,
+            genes,
             reference=reference_profile,
             alleles=allele_file,
-            genetic_map=args.genetic_map,
+            genetic_map=genetic_map,
         )
         temporary = out / "prepared.tmp.h5"
         write_bundle(temporary, data)
@@ -461,7 +537,7 @@ def main(argv=None):
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
     args = parser().parse_args(argv)
     try:
-        preprocess(args)
+        preprocess(**vars(args))
     except (ValueError, OSError, RuntimeError) as exc:
         LOG.error("%s", exc)
         return 1

@@ -415,28 +415,6 @@ def fit_from_files(matrix, cells, genes, panel_path, **options):
     return replace(fitted, audit={**fitted.audit, "assay_inputs": inputs})
 
 
-def fit_for_args(args, matrix):
-    if args.reference_panel is None:
-        return None
-    from .resources import resolve_expression_panel
-
-    args.reference_panel = resolve_expression_panel(
-        args.reference_panel, getattr(args, "config", None)
-    )
-    LOG.info("Fitting normal expression reference (%s)", args.reference_method)
-    return fit_from_files(
-        matrix,
-        args.cells,
-        args.genes,
-        args.reference_panel,
-        genome=args.genome,
-        method=args.reference_method,
-        min_cpm=args.reference_min_cpm,
-        max_iter=args.reference_iterations,
-        bin_genes=args.reference_bin_genes,
-    )
-
-
 def write_fit(directory, fitted):
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=False)

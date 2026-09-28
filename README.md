@@ -291,6 +291,53 @@ and centring are fixed without barcode labels; permutations preserve barcode
 cell counts across the cohort. Only the joint depth+allele statistic receives
 the formal permutation p-value.
 
+## Python workflows
+
+Every CLI command delegates to a high-level function in `barcodecnv.api`. These
+functions accept named parameters and return Python results; they do not parse
+command-line arguments or configure logging.
+
+```python
+from barcodecnv import api
+
+config = api.setup(genome="hg38")  # Download resources and provision tools once.
+prepared = api.preprocess(
+    outs="/path/to/cellranger/outs", cells="/path/to/cells.tsv",
+    config=config, out="results/preprocessing",
+)
+result = api.infer(prepared, out="results/inference", bootstraps=64, seed=42)
+probabilities = result["fit"].classes  # barcode × genomic marker × CN class
+```
+
+For the complete workflow in one call, use
+`api.run(outs=..., cells=..., config=config, out=...)`. The default expression
+panel is intended for B-cell samples. Supply `reference_panel` or `reference`
+when a different normal baseline is appropriate.
+
+| CLI command | Python function | Return value |
+| --- | --- | --- |
+| `setup` | `api.setup(...)` | Resource config `Path` |
+| `fit-reference` | `api.fit_reference(...)` | `FittedReference` with profile, weights and audit |
+| `preprocess` | `api.preprocess(...)` | Prepared bundle `Path` |
+| `prepare` | `api.prepare(...)` | `CellBundle`, also saved to `out` |
+| `signal` | `api.signal(...)` | Diagnostic dictionary |
+| `infer` | `api.infer(...)` | Analysis dictionary, including `signal` and `output_directory` |
+| `run` | `api.run(...)` | Same result as `infer` |
+
+Parameter names follow CLI options with underscores, for example
+`reference_panel` and `phase_iterations`. Use `cn_refinement=False` and
+`hf_refinement=False` for the CLI's `--no-…` switches. Paths accept strings or
+`pathlib.Path`; `infer` and `signal` also accept a `CellBundle` as their first
+argument, or the named count inputs accepted by the CLI. In-memory inputs are
+saved as `out/prepared.h5` for reproducibility.
+
+`fit_reference` can return a fit without writing files; pass `out` to save its
+profile and audit. The analysis functions write the same reports as the CLI and
+require a new output directory. `setup` reuses its resource cache. Functions
+raise exceptions on failure; preprocessing and analysis record failures after
+output creation. Use `help(api.infer)` or the other functions to inspect their
+signatures. The lower-level numerical interfaces below remain available.
+
 ## Design and ownership
 
 * `data.py`: validated, owned, read-only arrays of already prepared counts and

@@ -176,9 +176,8 @@ def test_failed_setup_preserves_previous_config(tmp_path, monkeypatch):
         "ensure_tools",
         lambda *a: (_ for _ in ()).throw(RuntimeError("tool install interrupted")),
     )
-    args = parser().parse_args(["setup", "--resource-dir", str(tmp_path)])
     with pytest.raises(RuntimeError, match="interrupted"):
-        r.setup(args)
+        r.setup(resource_dir=tmp_path)
     assert (root / "config.json").read_bytes() == previous
     assert json.loads((root / "setup.json").read_text())["status"] == "failed"
 

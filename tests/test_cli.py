@@ -454,12 +454,12 @@ def test_cli_rejects_incomplete_or_mixed_input_modes(tmp_path, capsys, inputs, m
 def test_raw_input_snapshot_survives_inference_failure(
     tmp_path, raw_inputs, monkeypatch
 ):
-    import barcodecnv.cli as cli
+    from barcodecnv import api
 
     def fail(*args, **kwargs):
         raise RuntimeError("controlled fitting failure")
 
-    monkeypatch.setattr(cli, "run_pbpc", fail)
+    monkeypatch.setattr(api, "run_pbpc", fail)
     out = tmp_path / "failed"
     assert main(["infer", *raw_inputs, "--out", str(out), "--skip-signal"]) == 1
     meta = json.loads((out / "run.json").read_text())
@@ -591,13 +591,13 @@ def test_end_to_end_matches_separate_stages(tmp_path, preprocessing_inputs, capl
 def test_end_to_end_stops_at_failed_stage(
     tmp_path, preprocessing_inputs, monkeypatch, stage
 ):
-    import barcodecnv.cli as cli
+    from barcodecnv import api
 
     def fail(*args, **kwargs):
         raise RuntimeError("controlled " + stage + " failure")
 
     monkeypatch.setattr(
-        cli, "preprocess" if stage == "preprocessing" else "run_pbpc", fail
+        api, "preprocess" if stage == "preprocessing" else "run_pbpc", fail
     )
     out = tmp_path / "failed_pipeline"
     assert main(["run", *preprocessing_inputs, "--out", str(out), "--skip-signal"]) == 1
@@ -617,12 +617,12 @@ def test_end_to_end_stops_at_failed_stage(
 def test_run_validates_inference_settings_before_preprocessing(
     tmp_path, preprocessing_inputs, monkeypatch
 ):
-    import barcodecnv.cli as cli
+    from barcodecnv import api
 
     def unexpected(*args):
         pytest.fail("preprocessing should not start")
 
-    monkeypatch.setattr(cli, "preprocess", unexpected)
+    monkeypatch.setattr(api, "preprocess", unexpected)
     out = tmp_path / "invalid"
     assert (
         main(["run", *preprocessing_inputs, "--out", str(out), "--bootstraps", "1"])
