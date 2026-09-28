@@ -15,6 +15,10 @@ uncertainty summaries. From this directory, build it with
 
 ## Command line
 
+For Linux x86_64, the [conda/mamba and pixi installation guide](docs/CONDA.md)
+describes installation from our GitHub Pages channel without cloning this repo.
+With that installation, use `barcodecnv` directly and run setup with `--tools path`.
+
 From this directory, `uv sync --locked` installs the pinned environment.
 
 For hg38 B-cell data, first fetch the resources and native tools, then run:

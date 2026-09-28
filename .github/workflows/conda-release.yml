@@ -1,0 +1,127 @@
+name: Conda release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing release tag to package (must match pyproject.toml)'
+        required: true
+        type: string
+
+# Serialize channel updates; never cancel an in-progress publication.
+concurrency:
+  group: conda-channel
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    defaults:
+      run:
+        shell: bash -el {0}
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+      MPLBACKEND: Agg
+      OPENBLAS_NUM_THREADS: '1'
+      CONDA_CHANNEL_PRIORITY: strict
+    steps:
+      - name: Check out packaging workflow
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: packaging
+          fetch-depth: 0
+      - name: Validate and stage the tagged source
+        working-directory: packaging
+        run: |
+          python - <<'PY'
+          import os, re
+          tag = os.environ['RELEASE_TAG']
+          if not re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+', tag):
+              raise SystemExit('Use a stable release tag such as v0.1.0')
+          PY
+          mkdir ../release
+          git archive "refs/tags/$RELEASE_TAG" | tar -x -C ../release
+          mkdir -p ../release/conda
+          cp conda/meta.yaml ../release/conda/meta.yaml
+          python - <<'PY'
+          import os, pathlib, tomllib
+          project = tomllib.loads(pathlib.Path('../release/pyproject.toml').read_text())['project']
+          if os.environ['RELEASE_TAG'] != 'v' + project['version']:
+              raise SystemExit('Tag and pyproject.toml version disagree')
+          PY
+      - name: Install conda build tools
+        uses: conda-incubator/setup-miniconda@fc2d68f6413eb2d87b895e92f8584b5b94a10167 # v3
+        with:
+          miniforge-version: latest
+          activate-environment: packaging
+          python-version: '3.13'
+          channels: conda-forge
+          channel-priority: strict
+      - name: Build and test installed package
+        run: |
+          python -m unittest discover -s packaging/conda -p 'test_*.py'
+          conda install -y --override-channels -c conda-forge conda-build conda-index
+          conda build release/conda --override-channels -c conda-forge -c bioconda \
+            --no-anaconda-upload --output-folder "$RUNNER_TEMP/conda-output"
+      - name: Restore persistent channel
+        working-directory: packaging
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          if git show-ref --verify --quiet refs/remotes/origin/conda-channel; then
+            git worktree add ../site origin/conda-channel
+          else
+            git worktree add --detach ../site HEAD
+            git -C ../site checkout --orphan conda-channel
+            git -C ../site rm -rf .
+          fi
+      - name: Add packages and regenerate channel index
+        run: |
+          python packaging/conda/publish_channel.py "$RUNNER_TEMP/conda-output" site
+          python -m conda_index site/channel
+          touch site/.nojekyll
+      - name: Check installation through channel metadata
+        run: |
+          conda create -y -p "$RUNNER_TEMP/channel-test" --override-channels \
+            -c "file://$GITHUB_WORKSPACE/site/channel" -c conda-forge -c bioconda \
+            "barcodecnv=${RELEASE_TAG#v}"
+          cd "$RUNNER_TEMP"
+          conda run -p "$RUNNER_TEMP/channel-test" barcodecnv --help
+          conda run -p "$RUNNER_TEMP/channel-test" python -c \
+            "from pathlib import Path; from barcodecnv.resources import ensure_tools; ensure_tools(Path('.'), 'path')"
+      - name: Save channel history
+        working-directory: site
+        run: |
+          git add .
+          if ! git diff --cached --quiet; then
+            git commit -m "Publish BarcodeCNV $RELEASE_TAG"
+            git push origin HEAD:refs/heads/conda-channel
+          fi
+      - name: Upload Pages site
+        uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4
+        with:
+          path: site
+
+  deploy:
+    needs: release
+    runs-on: ubuntu-24.04
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Configure Pages
+        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
+      - name: Deploy Pages
+        id: deployment
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4

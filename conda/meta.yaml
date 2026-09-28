@@ -1,0 +1,46 @@
+{% set project = load_file_data('../pyproject.toml', from_recipe_dir=True)['project'] %}
+
+package:
+  name: barcodecnv
+  version: {{ project['version'] }}
+
+source:
+  path: ..
+
+build:
+  number: 0
+  skip: true  # [not linux64]
+  script: "{{ PYTHON }} -m pip install . --no-deps --no-build-isolation -vv"
+
+requirements:
+  host:
+    - python 3.13.*
+    - pip
+    - setuptools >=77
+  run:
+    - python >=3.13,<3.14
+    {% for dependency in project['dependencies'] %}
+    - {{ dependency }}
+    {% endfor %}
+    - cellsnp-lite =1.2.3
+    - bcftools =1.22
+    - openjdk =17
+
+test:
+  imports:
+    - barcodecnv
+  source_files:
+    - tests
+  requires:
+    - pytest >=8
+  commands:
+    - barcodecnv --help
+    - barcodecnv setup --tools path --dry-run
+    - python -c "from pathlib import Path; from barcodecnv.resources import ensure_tools; ensure_tools(Path('.'), 'path')"
+    - pytest -q tests
+
+about:
+  home: https://github.com/jdm204/BarcodeCNV
+  license: MIT
+  license_file: LICENSE
+  summary: CNV inference for static-barcode lineage tracing single-cell RNA sequencing
