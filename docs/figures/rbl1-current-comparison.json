@@ -1,0 +1,36 @@
+{
+  "cells": 695,
+  "barcodes": 17,
+  "groups": 2,
+  "unresolved_barcodes": 2,
+  "phase_converged": true,
+  "initial_phase_iterations": 44,
+  "final_phase_iterations": 134,
+  "phase_iteration_budget": 180,
+  "seconds": 401.5997657007538,
+  "depth_outlier_probability": 0.05,
+  "group_depth_outlier_probability": 0.05,
+  "pvalue": 0.005,
+  "same_assignment_status": true,
+  "changed_assigned_pairs": 0,
+  "group_sizes": [
+    {
+      "group": 0,
+      "barcodes": 2,
+      "cells": 19
+    },
+    {
+      "group": 1,
+      "barcodes": 5,
+      "cells": 234
+    },
+    {
+      "group": 2,
+      "barcodes": 10,
+      "cells": 442
+    }
+  ],
+  "finite_probabilities": true,
+  "hdf5_depth_outlier_probability": 0.05,
+  "hdf5_group_depth_outlier_probability": 0.05
+}

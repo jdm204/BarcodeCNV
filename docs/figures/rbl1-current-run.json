@@ -1,0 +1,144 @@
+{
+  "command": "infer",
+  "input": "/home/jdm204/proj/BarcodeCNV/benchmarks/results/reports/pbpc_python_port_20260927/rbl1_cells.h5",
+  "input_kind": "bundle",
+  "version": "0.1.0",
+  "seed": 270929,
+  "arguments": {
+    "command": "infer",
+    "input": "/home/jdm204/proj/BarcodeCNV/benchmarks/results/reports/pbpc_python_port_20260927/rbl1_cells.h5",
+    "matrix": null,
+    "cells": null,
+    "genes": null,
+    "reference": null,
+    "reference_panel": null,
+    "genome": "hg38",
+    "reference_method": "global",
+    "reference_min_cpm": 2.0,
+    "reference_iterations": 2000,
+    "reference_bin_genes": 200,
+    "alleles": null,
+    "genetic_map": null,
+    "one_block": false,
+    "out": "/home/jdm204/proj/BarcodeCNV/benchmarks/results/reports/barcodecnv_rbl1_current_20260928",
+    "seed": 270929,
+    "permutations": 199,
+    "bin_width": 10000000,
+    "bootstraps": 64,
+    "draws": 256,
+    "phase_iterations": 180,
+    "depth_family": "pln",
+    "depth_outlier_probability": 0.05,
+    "barcode_phase": "joint",
+    "skip_signal": false,
+    "no_cn_refinement": false,
+    "no_hf_refinement": false
+  },
+  "input_sha256": "b7911f5c3c6ea8efbbda45081b1b8f9ce65df5c896e487d8c3fb253e93110d5c",
+  "barcode_signal_pvalue": 0.005,
+  "phase_converged": true,
+  "initial_phase_iterations": 44,
+  "final_phase_iterations": 134,
+  "pooled_alpha": 0.5323337126640428,
+  "barcode_alpha": 0.5514873670929885,
+  "dispersion_at_boundary": false,
+  "groups": 2,
+  "unresolved_barcodes": 2,
+  "model": {
+    "correlation_length_bp": 30000000.0,
+    "diploid_probability": 0.8,
+    "phase_switch_rate_per_cm": 1.0,
+    "phase_locus_weight": 0.0,
+    "allele_concentration": 20.0,
+    "allele_background": 0.1,
+    "depth_family": "pln"
+  },
+  "depth_options": {
+    "outlier_probability": 0.05,
+    "outlier_log_sd": 3.0
+  },
+  "hf_refinement": {
+    "status": "applied",
+    "window_bp": 10000000,
+    "stride_bp": 2000000,
+    "phase": "conditional MAP",
+    "groups_before": 2
+  },
+  "barcode_phase_method": "joint",
+  "group_reporting": {
+    "pooled_model": "one CN and phase path per final reporting-group pseudobulk",
+    "likelihood": "summed expression and allele counts; summed library exposure",
+    "depth_options": {
+      "outlier_probability": 0.05,
+      "outlier_log_sd": 3.0
+    },
+    "noise": "fitted to group pseudobulks",
+    "dispersion": {
+      "parameters": {
+        "alpha": 0.5324991640706116,
+        "mu": 0.0,
+        "allele_logit_bias": 0.030294747948180562
+      },
+      "initial_parameters": {
+        "alpha": 0.5690983893411707,
+        "mu": 0.0,
+        "allele_logit_bias": 0.030294747948180562
+      },
+      "converged": true,
+      "at_boundary": false,
+      "log_likelihood_gain": 9.16898211085936,
+      "trace": [
+        [
+          0.5690983893411707,
+          395190.0524579068
+        ],
+        [
+          0.01357863302886972,
+          427483.8591640217
+        ],
+        [
+          0.12595367399273177,
+          400939.591016365
+        ],
+        [
+          0.5758047560139015,
+          395193.5358138777
+        ],
+        [
+          0.8212469316288196,
+          395534.79609498224
+        ],
+        [
+          0.5456988399318714,
+          395182.1360296904
+        ],
+        [
+          0.5313911934726816,
+          395180.8933087911
+        ],
+        [
+          0.5324991640706116,
+          395180.8834757959
+        ],
+        [
+          0.5329355289670124,
+          395180.884637446
+        ],
+        [
+          0.5320632140840382,
+          395180.8851516696
+        ]
+      ]
+    },
+    "membership": "fixed; group zero excluded",
+    "consensus": "cell-weighted barcode class probabilities",
+    "confident_threshold": 0.95,
+    "conflict": "cell fraction with a confident barcode MAP class different from the indicated group call",
+    "segments": "runs of marginal MAP classes; bounds are first/last observed markers; probability summaries are not whole-segment probabilities"
+  },
+  "depth_sigma": 0.6627322705967212,
+  "reference_parameterization": "latent lognormal median",
+  "uncertainty": "CN and phase integrated jointly within barcodes, conditional on fitted noise; membership values are bootstrap stability, not clone posterior probabilities",
+  "status": "complete",
+  "seconds": 401.5997657007538
+}

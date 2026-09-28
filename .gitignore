@@ -1,0 +1,18 @@
+.venv/
+.pytest_cache/
+*.egg-info/
+build/
+dist/
+# Compiled methods document beside its Typst source.
+/docs/pbpc.pdf
+
+# Local preprocessing tools/resources and Python caches.
+.preprocessing/
+__pycache__/
+*.py[cod]
+
+# Ruff cache is local development state.
+.ruff_cache/
+
+# Historical local port validation; not part of the standalone release.
+/validation/

@@ -1,0 +1,11 @@
+{
+  "source_directory": "benchmarks/results/reports/barcodecnv_depth_controls_20260927",
+  "date": "2026-09-27",
+  "evaluation": "Fixed inferred memberships; refitted PLN inlier dispersion; joint CN/phase HMM; 30 Mb CN prior. Not an end-to-end regrouping benchmark.",
+  "source_sha256": {
+    "benchmarks/results/reports/barcodecnv_depth_controls_20260927/summary.csv": "8c6c1c33bec0eebbff22267ec661c740f4dc11195074e161ea533460e68a4434",
+    "benchmarks/results/reports/barcodecnv_depth_controls_20260927/rbl1/real/inputs.npz": "98d91731903b1df066f7a048031346b60c99d7d62156b69e5b3188762f5e3a8a",
+    "benchmarks/results/reports/barcodecnv_depth_controls_20260927/rbl1/real/outlier_5pct/inference.npz": "2fe4abe573c27e888bd90abb7803c88684a533938b3160a5549d0c8575a0d27d",
+    "benchmarks/results/reports/barcodecnv_depth_controls_20260927/rbl1/real/outlier_5pct/complete.json": "b2cde81cfe2e56f06c6fbfeedcb5d13bfbc54b835bc72faa004cf7b213d678b4"
+  }
+}

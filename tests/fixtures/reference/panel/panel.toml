@@ -1,0 +1,7 @@
+annotation = "fixture"
+genome = "hg38"
+id = "fixture"
+schema_version = 1
+units = "fraction"
+
+[provenance]

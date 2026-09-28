@@ -1,0 +1,27 @@
+{
+  "date": "2026-09-28",
+  "scope": "Full inference rerun from the validated RBL1 count bundle; existing reference retained; no new reference fit or BAM preprocessing. Model defaults including 5% depth outlier; phase iteration cap raised to 180.",
+  "source_directory": "/home/jdm204/proj/BarcodeCNV/benchmarks/results/reports/barcodecnv_rbl1_current_20260928",
+  "artifacts": [
+    {
+      "file": "rbl1-current-summary.png",
+      "source": "/home/jdm204/proj/BarcodeCNV/benchmarks/results/reports/barcodecnv_rbl1_current_20260928/summary.png",
+      "sha256": "ea6fd57016575737640c564a97392dd9e2dd2d1e18757d4ef68ae19658289665"
+    },
+    {
+      "file": "rbl1-current-group-cn.png",
+      "source": "/home/jdm204/proj/BarcodeCNV/benchmarks/results/reports/barcodecnv_rbl1_current_20260928/group_cn.png",
+      "sha256": "d8af9de7bca4867679a6efb2f1239af90ff50a40055576f04a11cbf26196ae3c"
+    },
+    {
+      "file": "rbl1-current-run.json",
+      "source": "/home/jdm204/proj/BarcodeCNV/benchmarks/results/reports/barcodecnv_rbl1_current_20260928/run.json",
+      "sha256": "310b61bbcaf025752f4512f5233c8c4a03002003029cb1fbb59e126f9472d3d3"
+    },
+    {
+      "file": "rbl1-current-comparison.json",
+      "source": "/home/jdm204/proj/BarcodeCNV/benchmarks/results/reports/barcodecnv_rbl1_current_20260928/rerun_comparison.json",
+      "sha256": "347b84df4e649e6b02c244cc598b5be42fc68a37ceb03c7201562c1b0223a70d"
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+include .python-version uv.lock
+recursive-include tests *.py *.toml *.tsv *.csv *.txt *.R *.h5
+prune validation
+include preprocessing.sh setup_preprocessing.py
+recursive-include docs *.md *.typ *.png *.csv *.json *.npz *.py
