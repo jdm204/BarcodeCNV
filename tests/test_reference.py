@@ -9,12 +9,15 @@ import h5py
 import numpy as np
 import pandas as pd
 import pytest
+from scipy.special import softmax
 from test_cli import preprocessing_inputs as preprocessing_inputs
 from test_cli import raw_inputs as raw_inputs
 
 from barcodecnv.cli import main
 from barcodecnv.loading import canonical_genes
 from barcodecnv.reference import (
+    ReferencePanel,
+    _global_loss_gradient,
     contiguous_bins,
     fit_mixture,
     fit_reference,
@@ -26,9 +29,12 @@ from barcodecnv.reference import (
 FIXTURES = Path(__file__).parent / "fixtures/reference"
 
 
-def test_adam_matches_julia_at_intermediate_and_final_updates():
+def test_adam_matches_julia_when_full_gene_universe_is_retained():
     fixtures = tomllib.loads((FIXTURES / "julia_reference.toml").read_text())
     for case in fixtures["global"]:
+        # Legacy subset fixtures use the old, mismatched-normalization objective.
+        if case["name"].startswith("subset_"):
+            continue
         actual = global_weights(
             np.array(case["matrix"]),
             np.array(case["observed"]),
@@ -44,6 +50,57 @@ def test_adam_matches_julia_at_intermediate_and_final_updates():
     assert converged
     np.testing.assert_allclose(weights, [0.2, 0.5, 0.3], atol=1e-5)
     assert not fit_mixture(matrix, observed, max_iter=1)[1]
+
+
+def test_global_gradient_matches_finite_differences_after_gene_filtering():
+    matrix = np.array([[0.05, 0.4, 0.2], [0.15, 0.1, 0.3]])
+    observed = np.array([0.6, 0.4])
+    logits = np.array([0.2, -0.5, 0.7])
+    loss, gradient = _global_loss_gradient(matrix, np.log(observed), softmax(logits))
+
+    def objective(x):
+        prediction = matrix @ softmax(x)
+        prediction /= prediction.sum()
+        return np.mean(np.log(prediction / observed) ** 2)
+
+    assert loss == pytest.approx(objective(logits))
+    steps = np.eye(3) * 1e-5
+    numerical = [(objective(logits + h) - objective(logits - h)) / 2e-5 for h in steps]
+    np.testing.assert_allclose(gradient, numerical, atol=1e-9, rtol=1e-7)
+
+
+@pytest.mark.parametrize("subset", [False, True])
+def test_global_recovers_full_universe_weights_after_gene_filtering(subset):
+    matrix = np.vstack(([[0.05, 0.4], [0.15, 0.1]], np.tile([0.008, 0.005], (100, 1))))
+    ids = tuple(f"g{i}" for i in range(len(matrix)))
+    panel = ReferencePanel(
+        "test",
+        "hg38",
+        "test",
+        ids,
+        ("a", "b"),
+        matrix,
+        pd.DataFrame({"id": ["a", "b"]}),
+        {},
+    )
+    truth = np.array([0.35, 0.65])
+    counts = 1e6 * (matrix @ truth)
+    genes = pd.DataFrame(
+        {"gene": ids, "chromosome": "chr1", "position": np.arange(1, len(ids) + 1)}
+    )
+    fitted = fit_reference(
+        panel,
+        ids[:2] if subset else ids,
+        counts[:2] if subset else counts,
+        genes,
+        genome="hg38",
+        min_cpm=0 if subset else 10000,
+    )
+    np.testing.assert_allclose(list(fitted.weights.values()), truth, atol=1e-6)
+    np.testing.assert_allclose(list(fitted.profile.values()), matrix @ truth, atol=1e-7)
+    assert fitted.audit["fitting_gene_ids"] == ["g0", "g1"]
+    assert fitted.audit["mean_squared_log_error"] < 1e-12
+    assert fitted.audit["logit_gradient_max_abs"] < 1e-7
 
 
 def test_regional_matches_julia_and_refuses_unidentified_or_unfinished_fits():
@@ -118,6 +175,7 @@ def test_gene_join_selection_and_full_panel_normalization():
         panel, ["ENSG1", "ENSG2"], [34, 50], genes, genome="hg38", min_cpm=0
     )
     assert sum(subset.profile.values()) == pytest.approx(1)
+    assert subset.weights["naive"] == pytest.approx(0.4, abs=1e-5)
     assert (
         subset.profile["ENSG3"] > 0
     )  # never normalize the output on the fitting subset
@@ -240,7 +298,7 @@ def test_run_with_panel_matches_pre_fitted_profile(
     )
     fit = tmp_path / "panel_run/preprocessing/reference_fit"
     assert json.loads((fit / "fit.json").read_text())["normalization"].startswith(
-        "observed normalized"
+        "observed and predicted mixture normalized"
     )
     assert pd.read_csv(fit / "reference.tsv", sep="\t").fraction.sum() == pytest.approx(
         1

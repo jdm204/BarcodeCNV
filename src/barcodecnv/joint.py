@@ -35,6 +35,10 @@ class JointChain:
 
 class JointWorkspace:
     def __init__(self, data, model, parameters, *, depth_options=DepthOptions()):
+        if np.any(np.diff(data.loci.marker) == 0):
+            raise ValueError(
+                "joint inference requires each SNP to occupy a distinct grid marker"
+            )
         self.data, self.model = data, model
         self.depth_options = depth_options
         self.depth = DepthWorkspace(data, model, depth_options)

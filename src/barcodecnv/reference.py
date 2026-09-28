@@ -1,8 +1,8 @@
 """Normal expression mixture fitting, ported from BarcodeCNV.Expression.
 
 Global fitting adapts Numbat's fit_ref_sse: squared log-ratio error with free
-softmax logits and the same fixed-budget Adam updates as Optimisers.jl. The
-opt-in regional method uses SciPy BFGS with nuisance scales and a geometric median.
+softmax logits, matched fitting-gene normalization and fixed-budget Adam updates.
+The opt-in regional method uses SciPy BFGS with nuisance scales and a geometric median.
 """
 
 import hashlib
@@ -130,8 +130,26 @@ def read_panel(directory):
     )
 
 
+def _global_loss_gradient(matrix, log_observed, weights):
+    """Matched-normalization log error and its gradient in softmax logits."""
+    fitted = matrix @ weights
+    if np.any(fitted <= 0):
+        raise ValueError("nonpositive mixture prediction on fitting genes")
+    total = fitted.sum()
+    residual = np.log(fitted / total) - log_observed
+    gradient_weights = (2 / len(residual)) * (
+        matrix.T @ (residual / fitted) - matrix.sum(axis=0) * (residual.sum() / total)
+    )
+    gradient = weights * (gradient_weights - weights @ gradient_weights)
+    return float(np.mean(residual**2)), gradient
+
+
 def global_weights(matrix, observed, *, max_iter=2000):
-    """Exact Optimisers.jl Adam parameterization, including bias correction/epsilon."""
+    """Fit mixture shape on selected genes using Optimisers.jl's Adam settings.
+
+    Normalize the mixture, not individual columns: weights retain their meaning
+    on the full panel universe when fitting-gene coverage differs by profile.
+    """
     logits = np.zeros(matrix.shape[1])
     first = logits.copy()
     second = logits.copy()
@@ -139,13 +157,7 @@ def global_weights(matrix, observed, *, max_iter=2000):
     beta1_power, beta2_power = 0.9, 0.999
     for _ in range(max_iter):
         weights = softmax(logits)
-        fitted = matrix @ weights
-        if np.any(fitted <= 0):
-            raise ValueError("nonpositive mixture prediction on fitting genes")
-        gradient_weights = 2 * (matrix.T @ ((np.log(fitted) - log_observed) / fitted))
-        gradient = (
-            weights * (gradient_weights - weights @ gradient_weights) / len(observed)
-        )
+        _, gradient = _global_loss_gradient(matrix, log_observed, weights)
         first = 0.9 * first + 0.1 * gradient
         second = 0.999 * second + (1 - 0.999) * gradient**2
         logits -= (
@@ -326,12 +338,11 @@ def fit_reference(
     if method == "global":
         weights = global_weights(matrix, observed, max_iter=max_iter)
         details["termination"] = "fixed_iteration_budget; not a convergence guarantee"
-        predicted = matrix @ weights
-        residual = np.log(predicted) - np.log(observed)
-        gw = 2 * (matrix.T @ (residual / predicted))
-        details["mean_squared_log_error"] = float(np.mean(residual**2))
-        details["logit_gradient_max_abs"] = float(
-            np.max(np.abs(weights * (gw - weights @ gw) / len(observed)))
+        loss, gradient = _global_loss_gradient(matrix, np.log(observed), weights)
+        details["mean_squared_log_error"] = loss
+        details["logit_gradient_max_abs"] = float(np.max(np.abs(gradient)))
+        details["objective"] = (
+            "mean_squared_log_error_after_normalizing_observed_and_mixture_on_fitting_genes"
         )
     else:
         chosen = annotation.loc[[ids[i] for i in selected]]
@@ -364,7 +375,11 @@ def fit_reference(
         panel_id=panel.id,
         panel_annotation=panel.annotation,
         panel_provenance=panel.provenance,
-        normalization="observed normalized on fitting genes; panel retains full measured universe",
+        normalization=(
+            "observed and predicted mixture normalized on fitting genes; output retains full measured universe"
+            if method == "global"
+            else "observed normalized on fitting genes; regional nuisance scales; output retains full measured universe"
+        ),
         **details,
     )
     return FittedReference(

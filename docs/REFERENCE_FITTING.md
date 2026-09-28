@@ -39,12 +39,16 @@ Absent panel genes remain unmeasured rather than becoming zero-expression genes.
 
 ## Fitting modes
 
-The default `--reference-method global` ports the Julia adaptation of Numbat's
+The default `--reference-method global` adapts the Julia implementation of Numbat's
 `fit_ref_sse`. Genes pass when their mean panel expression is strictly above
 `--reference-min-cpm` (default 2) and their pooled observed expression is positive.
-Observed counts are normalized over these fitting genes. Reference columns retain
-fractions on the panel's complete measured gene universe. The fit minimizes mean
-squared log-ratio error with nonnegative, sum-to-one softmax mixture weights.
+Observed counts and the predicted mixture are both normalized over these fitting
+genes before calculating mean squared log-ratio error. This corrects the original
+port's comparison of selected-gene observations with full-universe predictions.
+For selected panel rows `M` and softmax weights `w`, the prediction is
+`(M @ w) / sum(M @ w)`. The gradient includes this normalization. Individual panel
+columns are not renormalized: mixture weights retain their meaning on the full
+panel gene universe, and the saved profile is the full panel matrix times `w`.
 All logits are free; Adam uses the same learning rate 0.05, betas (0.9, 0.999),
 epsilon 1e-8, zero initialization and bias correction as Julia Optimisers.jl.
 `--reference-iterations 2000` is a fixed update budget, not a convergence guarantee.
@@ -81,5 +85,7 @@ sample.h5` uses a sibling `sample.h5.reference_fit/` directory.
 - `fit.json`: method/settings, panel provenance/checksums, fitting diagnostics,
   input paths, cell/annotation checksums, selected-cell count and pooled-count hash.
 
-Reference-fitting regression checks, including saved Julia numerical expectations,
-are in [`tests/test_reference.py`](../tests/test_reference.py).
+Reference-fitting regression checks cover filtered-gene mixture recovery, a
+finite-difference gradient check, and saved Julia numerical expectations where
+the full gene universe is retained. Legacy subset fits intentionally differ.
+The checks are in [`tests/test_reference.py`](../tests/test_reference.py).
