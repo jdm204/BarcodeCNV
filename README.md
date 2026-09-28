@@ -5,6 +5,69 @@ Here, static-barcode lineage tracing means transducing cells with inherited, exp
 
 BarcodeCNV uses static lineage barcodes to pool sparse single-cell RNA counts, identify supported groups of genetically similar barcodes, and estimate their copy-number alterations. The aim is to support genotype-phenotype analysis while leaving weakly supported memberships unresolved. Grouping starts from self-centred, InferCNV-style smoothed expression and uses recursive binary splitting, with whole-cell bootstraps to assess split support and membership stability. Count-based CN contrasts and local smoothed haplotype-fraction (HF) differences can further subdivide these groups. An external normal expression reference, supplied directly or fitted as a mixture of available normal profiles, supports CN calling. A default 5% CN-independent depth-outlier component limits the influence of individual genes inconsistent with that reference. A dual-signal hidden Markov model (HMM) combines unsmoothed expression counts and phased allele counts to report uncertain CN states for each barcode and for directly pooled cells within each final group. A permutation diagnostic separately tests for barcode-associated regional signal.
 
+# Quick Start
+
+Choose one installation route below; no manual repository clone is needed.
+These instructions support **Linux x86_64** and start from **hg38 Cell Ranger
+outputs**, using the B-cell normal expression panel by default. Supply a
+`cells.tsv` file with `cell` and `barcode` columns mapping cell IDs to lineage
+barcodes. Use `--one-block` only for an exchangeable cohort; otherwise include
+a `block` column and omit that option.
+
+## Conda / Mamba
+
+```sh
+conda create -n barcodecnv --override-channels --strict-channel-priority \
+  -c https://jdm204.github.io/BarcodeCNV/channel \
+  -c conda-forge -c bioconda barcodecnv
+conda activate barcodecnv
+barcodecnv setup --tools path --genome hg38
+barcodecnv run --outs /path/to/cellranger/outs \
+  --cells cells.tsv --one-block --out results
+```
+
+For Mamba, replace `conda` with `mamba` in the create and activate commands.
+This installs the Python package, cellSNP-lite, bcftools and Java together;
+`setup --tools path` uses those tools and downloads Beagle and the reference data.
+
+## Pixi
+
+```sh
+pixi global install \
+  -c https://jdm204.github.io/BarcodeCNV/channel \
+  -c conda-forge -c bioconda barcodecnv
+barcodecnv setup --tools path --genome hg38
+barcodecnv run --outs /path/to/cellranger/outs \
+  --cells cells.tsv --one-block --out results
+```
+
+Pixi installs the same conda package and exposes `barcodecnv` without requiring
+environment activation. See [CONDA.md](docs/CONDA.md) for version pinning and
+channel details.
+
+## uv
+
+With uv and Git installed, install the tagged Python release directly from GitHub:
+
+```sh
+uv tool install --python 3.13 \
+  "git+https://github.com/jdm204/BarcodeCNV.git@v0.1.0"
+barcodecnv setup --genome hg38
+barcodecnv run --outs /path/to/cellranger/outs \
+  --cells cells.tsv --one-block --out results
+```
+
+uv manages an isolated Python environment. Here, `setup` also installs
+cellSNP-lite, bcftools and Java in a private environment. If uv reports that its
+executable directory is missing from `PATH`, run `uv tool update-shell` and open
+a new shell before running `barcodecnv`.
+
+For all three routes, setup is a one-time shared download: allow approximately
+32.4 GB of transfers plus tools and smaller resources, and 15–20 GB free disk
+space. See [RESOURCES.md](docs/RESOURCES.md) for cache locations and retries, and
+[PREPROCESSING.md](docs/PREPROCESSING.md) for input requirements and reference
+overrides. Final tables and plots are written to `results/inference/`.
+
 # Usage
 
 Cell Ranger preprocessing uses cellSNP-lite and Beagle; normal expression reference fitting is included in Python.
@@ -15,11 +78,10 @@ uncertainty summaries. From this directory, build it with
 
 ## Command line
 
-For Linux x86_64, the [conda/mamba and pixi installation guide](docs/CONDA.md)
-describes installation from our GitHub Pages channel without cloning this repo.
-With that installation, use `barcodecnv` directly and run setup with `--tools path`.
-
-From this directory, `uv sync --locked` installs the pinned environment.
+The examples below use a source checkout: from this directory, `uv sync --locked`
+installs the pinned development environment. If you installed through any Quick
+Start route above, replace `uv run barcodecnv` with `barcodecnv`; for conda/mamba
+or pixi, retain `--tools path` when running setup.
 
 For hg38 B-cell data, first fetch the resources and native tools, then run:
 
