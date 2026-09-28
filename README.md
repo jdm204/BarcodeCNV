@@ -1,5 +1,3 @@
-# BarcodeCNV
-
 <img src="docs/assets/logo.png" alt="Two lineage barcodes beside copy-number heatmap blocks" width="420">
 
 BarcodeCNV is a CNV-calling tool designed for static-barcode lineage tracing single cell RNA sequencing.
@@ -47,7 +45,7 @@ uv run barcodecnv infer prepared_sample/prepared.h5 --out results
 ```
 
 A pre-fitted `--reference` can be replaced by `--reference-panel /path/to/panel`.
-The Python tool then fits the Julia-compatible normal expression mixture and
+The Python tool then fits the normal expression mixture and
 saves the profile, weights and gene-selection audit. `fit-reference` exposes that
 step on its own. See [REFERENCE_FITTING.md](docs/REFERENCE_FITTING.md) for panel format,
 settings, the optional regional method and limitations.
@@ -128,11 +126,11 @@ contamination-mixture extension of the existing depth emission, not spatial
 binning or likelihood tempering. `run.json` and HDF5 attributes record the
 outlier probability and scale.
 
-`pln` adapts the Julia/Numbat Poisson–lognormal count likelihood. Its reference
+`pln` adapts Poisson–lognormal count likelihood. Its reference
 rate is the **latent median**; NB uses the arithmetic mean. For PLN,
 `sigma = sqrt(log1p(alpha))`; `alpha` remains the existing noise-search coordinate.
-SciPy supplies mode location and adaptive QUADPACK quadrature, validated against
-Julia. Numba compiles the integrand to a C callback; quadrature convergence
+SciPy supplies mode location and adaptive QUADPACK quadrature. 
+Numba compiles the integrand to a C callback; quadrature convergence
 checks remain with SciPy. No approximate depth distribution is substituted.
 
 `joint` sums and samples complete CN/phase paths in a 20-state HMM separately
@@ -169,9 +167,8 @@ numeric-looking barcodes. Physical coordinates are one-based.
   (default 1) and `phase_prob` (default 0.99, an explicit convention rather than
   a measured phase quality). Numbat `cell/CHROM/POS/AD/DP/GT/cM` is also accepted;
   `GT` must be phased `0|1` or `1|0`. Omit allele counts for expression-only data.
-* **Genetic positions:** a PLINK four-column `.map` file or directory of maps;
-  linear interpolation with endpoint clamping matches Julia. Without a map,
-  allele tables must contain consistent per-locus `genetic_cm` (or `cM`) values.
+* **Genetic positions:** a PLINK four-column `.map` file or directory of maps. 
+  Without a map, allele tables must contain consistent per-locus `genetic_cm` (or `cM`) values.
 
 Only annotated cells are retained. Reference-supported annotated genes present
 in the assay are used; the loader performs no CN-based gene selection. The
@@ -235,11 +232,12 @@ the formal permutation p-value.
 * `data.py`: validated, owned, read-only arrays of already prepared counts and
   reference expectations. Gene and SNP records map onto a common genomic grid;
   physical positions remain one-based, array indices are zero-based.
-* `model.py`/`depth.py`: copy catalogue, count likelihoods and genomic/phase priors.
-  This adapts the existing Julia CNVModel1 model, using Poisson–lognormal depth
-  by default and retaining NB as a comparator. For PLN the latent median is
-  reference × dosage and log-scale noise is `sqrt(log1p(alpha))`. For NB the
-  mean is reference × dosage and variance is `mean + alpha * mean**2`.
+* `model.py`/`depth.py`: copy catalogue, count likelihoods and
+  genomic/phase priors. This uses Poisson–lognormal depth by default
+  and retaining NB as a comparator. For PLN the latent median is
+  reference × dosage and log-scale noise is `sqrt(log1p(alpha))`. For
+  NB the mean is reference × dosage and variance is `mean + alpha *
+  mean**2`.
 * `hmm.py`: numerical inference from supplied potentials, with no biological or
   barcode assumptions. Results own their arrays. Sampling produces independent
   conditional whole paths, not MCMC samples.
@@ -291,20 +289,18 @@ through step 14 and is checked against independently generated R fixtures.
 
 Use [`barcodecnv preprocess`](docs/PREPROCESSING.md) to obtain a ready-to-run cell bundle
 from an indexed Cell Ranger BAM, expression counts and cell-to-lineage map.
-The Python wrapper follows the existing Julia cellSNP-lite/Beagle pipeline;
-Julia and R are not required. Supply a normal expression profile or a reference panel to fit.
+Supply a normal expression profile or a reference panel to fit.
 See [PREPROCESSING.md](docs/PREPROCESSING.md) for local setup, inputs and assumptions.
 
 ## Statistical scope
 
-The pooled CN and shared-phase fit uses structured variational updates, as in
-Julia; its product approximation is not the exact joint CN/phase posterior.
+The pooled CN and shared-phase fit uses structured variational updates
+its product approximation is not the exact joint CN/phase posterior.
 That fit supplies the common alignment used for HF features. Default barcode
 CN calling instead integrates phase with a joint CN × phase HMM independently
 within each barcode. The optional `conditional` route uses **expected log
 likelihoods** under the pooled phase probabilities. The phase-switch process follows Numbat's
-two-state continuous-time formulation. The CN reset prior is the existing Julia
-distance-dependent prior, not an evolutionary model.
+two-state continuous-time formulation.
 
 Fitting first estimates pooled phase with heuristic dispersion, fits pooled
 dispersion at fixed phase, and refits pooled phase. Default barcode inference
@@ -395,7 +391,7 @@ uv run pytest
 
 Python 3.13 is selected by `.python-version`; `uv.lock` pins the development
 environment. Runtime dependencies are NumPy, SciPy, Numba, pandas, h5py and
-Matplotlib; development adds pytest and Ruff. No Julia, JAX, R or GPU is required.
+Matplotlib; development adds pytest and Ruff.
 
 Ruff owns formatting, import sorting and linting for the package, tests, figure
 scripts and validation scripts. Configuration lives in `pyproject.toml`, targeting
@@ -416,9 +412,6 @@ semantics. Unsafe automatic fixes are not enabled.
 lint/format checks and pytest against the locked
 Python 3.13 environment. It does not download preprocessing resources or run
 external-data benchmarks.
-
-The tests include saved Julia numerical expectations and R InferCNV smoothing
-fixtures. Historical development benchmarks are not bundled with this release.
 
 ### LLM Use
 
