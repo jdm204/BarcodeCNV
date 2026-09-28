@@ -237,7 +237,7 @@ def add_count_inputs(command, *, required=False):
         help="10x matrix directory or filtered_feature_bc_matrix.h5",
     )
     command.add_argument(
-        "--cells", required=required, type=Path, help="cell/barcode/block CSV or TSV"
+        "--cells", required=required, type=Path, help="cell/barcode CSV or TSV"
     )
     command.add_argument(
         "--genes",
@@ -256,11 +256,6 @@ def add_count_inputs(command, *, required=False):
         type=Path,
         help="PLINK map file/directory; otherwise use per-SNP genetic_cm/cM",
     )
-    command.add_argument(
-        "--one-block",
-        action="store_true",
-        help="explicitly declare one exchangeable cohort if cells lack a block column",
-    )
 
 
 def load_count_inputs(args):
@@ -272,7 +267,6 @@ def load_count_inputs(args):
         reference=fitted.profile if fitted else args.reference,
         alleles=args.alleles,
         genetic_map=args.genetic_map,
-        one_block=args.one_block,
     )
     return bundle, fitted
 
@@ -281,20 +275,17 @@ def validate_source(args, command_parser):
     """Reject ambiguous/incomplete input modes before reading or writing files."""
     if args.command == "prepare":
         return
-    raw = (
-        any(
-            getattr(args, key) is not None
-            for key in (
-                "matrix",
-                "cells",
-                "genes",
-                "reference",
-                "reference_panel",
-                "alleles",
-                "genetic_map",
-            )
+    raw = any(
+        getattr(args, key) is not None
+        for key in (
+            "matrix",
+            "cells",
+            "genes",
+            "reference",
+            "reference_panel",
+            "alleles",
+            "genetic_map",
         )
-        or args.one_block
     )
     if args.input is not None:
         if raw:
@@ -418,7 +409,7 @@ def parser():
             "input",
             nargs="?",
             type=Path,
-            help="prepared cell-counts-v1 HDF5 bundle; omit when using --matrix",
+            help="prepared cell-counts HDF5 bundle; omit when using --matrix",
         )
         add_count_inputs(command)
         command.add_argument(
@@ -627,7 +618,7 @@ def analyse(args):
             )
         if args.command == "signal" or not args.skip_signal:
             log.info(
-                "Barcode association: %s permutations within declared exchangeability blocks",
+                "Barcode association: %s permutations across all selected cells",
                 args.permutations,
             )
             signal = barcode_signal_test(

@@ -55,7 +55,7 @@ A separate permutation test asks whether the supplied barcodes explain regional 
 
 == Cell counts, reference and genomic coordinates
 
-The input is a cell-count bundle containing a sparse gene-by-cell expression matrix, per-cell phased H1/H2 counts, cell-to-barcode labels, exchangeability blocks, gene/SNP positions, a genetic map and an external diploid expression reference. A reference is required for the full workflow but not the separate association diagnostic. The Python workflow can fit a normal expression panel and perform BAM-to-allele counting/phasing before constructing this bundle.
+The input is a cell-count bundle containing a sparse gene-by-cell expression matrix, per-cell phased H1/H2 counts, cell-to-barcode labels, gene/SNP positions, a genetic map and an external diploid expression reference. A reference is required for the full workflow but not the separate association diagnostic. The Python workflow can fit a normal expression panel and perform BAM-to-allele counting/phasing before constructing this bundle.
 
 Let $b$ index barcodes, $g$ genes, $l$ SNPs and $t$ positions in the sorted union of gene midpoints and SNP sites. The barcode expression count is $Y_(b,g)$, and its diploid expectation is
 $ E_(b,g) = r_g sum_(i in b) L_i, $
@@ -248,11 +248,11 @@ $ S = sum_(b,k) frac((D_(b,k)-M_(b,k))^2,M_(b,k))
     N_(b,k)hat(q)_k(1-hat(q)_k)). $
 Zero-denominator terms contribute zero. These are standardized residual summaries; no theoretical chi-squared null is assumed.
 
-Shuffle whole-cell barcode labels within the supplied exchangeability blocks. This preserves barcode sizes within each block while allowing their RNA exposures to change with the shuffled cells. The statistic's cohort centering and feature definitions remain fixed. With $Q=199$ shuffles, the joint depth-plus-allele score receives the Monte Carlo p-value
+Shuffle whole-cell barcode labels across the selected cohort. This preserves barcode sizes while allowing their RNA exposures to change with the shuffled cells. The statistic's cohort centering and feature definitions remain fixed. With $Q=199$ shuffles, the joint depth-plus-allele score receives the Monte Carlo p-value
 $ p_("perm") = frac(1+sum_(q=1)^Q bb(1)[S_q >= S_("obs")],Q+1), $
-including numerical ties. This convention follows #doi("10.2202/1544-6115.1585")[Phipson and Smyth (2010)]. Depth and allele contributions are also reported, but only the joint score receives the formal p-value. No HMM is fitted during shuffling. If blocks permit no exchanges between barcode labels, the result is unassessable.
+including numerical ties. This convention follows #doi("10.2202/1544-6115.1585")[Phipson and Smyth (2010)]. Depth and allele contributions are also reported, but only the joint score receives the formal p-value. No HMM is fitted during shuffling. If fewer than two lineage barcodes are present, the result is unassessable.
 
-Blocks must encode appropriate sample/batch restrictions; the program does not infer them automatically. A small p-value indicates barcode-associated regional structure under these restrictions. Expression programmes can contribute, and coarse regions can conceal opposing focal changes or phase patterns. A nonsignificant result can reflect limited power or barcode timing even when CN variation is present. It is a lineage-information diagnostic, not a general data-quality score or evidence that clone probabilities are calibrated.
+The selected cells are treated as one cohort from one donor. A small p-value indicates barcode-associated regional structure. Expression programmes can contribute, and coarse regions can conceal opposing focal changes or phase patterns. A nonsignificant result can reflect limited power or barcode timing even when CN variation is present. It is a lineage-information diagnostic, not a general data-quality score or evidence that clone probabilities are calibrated.
 
 == Three distinct uncertainty questions
 
@@ -344,7 +344,7 @@ uv run barcodecnv infer results/prepared.h5 --out matched_reference \
   --depth-outlier-probability 0.01
 ```
 
-For Cell Ranger outputs, `barcodecnv run --outs OUTS --cells CELLS --reference REFERENCE --one-block --out RESULTS` runs preprocessing and inference, with console stage messages. It saves intermediate files and a reusable bundle under `RESULTS/preprocessing/`, final tables and plots under `RESULTS/inference/`, and overall status in `RESULTS/pipeline.json`. `barcodecnv preprocess` runs only the cellSNP-lite/Beagle preparation stage. Tools and human hg38 resources are configured separately; normal expression reference fitting is available with `--reference-panel`, while FASTQ alignment remains upstream. Omit `--one-block` when the cell table supplies exchangeability blocks.
+For Cell Ranger outputs, `barcodecnv run --outs OUTS --cells CELLS --reference REFERENCE --out RESULTS` runs preprocessing and inference, with console stage messages. It saves intermediate files and a reusable bundle under `RESULTS/preprocessing/`, final tables and plots under `RESULTS/inference/`, and overall status in `RESULTS/pipeline.json`. `barcodecnv preprocess` runs only the cellSNP-lite/Beagle preparation stage. Tools and human hg38 resources are configured separately; normal expression reference fitting is available with `--reference-panel`, while FASTQ alignment remains upstream. All selected cells are treated as one cohort from one donor.
 
 The examples above start from existing count matrices and annotation/phased-allele tables. `infer` saves `prepared.h5` inside its output directory, records the input hash and source paths, then performs the diagnostic, inference and reporting. The snapshot survives a subsequent fitting failure. The separate `prepare` command is optional; `signal` can also load count files directly without a reference.
 

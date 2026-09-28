@@ -104,7 +104,7 @@ def add_arguments(root):
         "--cells",
         type=Path,
         required=True,
-        help="cell/barcode/block CSV or TSV; aliases cell_barcode/lineage_barcode",
+        help="cell/barcode CSV or TSV; aliases cell_barcode/lineage_barcode",
     )
     add_reference_arguments(root, required=False, genome=False)
     root.add_argument(
@@ -152,11 +152,6 @@ def add_arguments(root):
         help="Beagle Java heap; chromosomes run sequentially",
     )
     root.add_argument("--seed", type=int, default=42)
-    root.add_argument(
-        "--one-block",
-        action="store_true",
-        help="explicitly declare one exchangeable cohort if block column is absent",
-    )
     root.add_argument(
         "--cellsnp-dir",
         type=Path,
@@ -264,15 +259,12 @@ def preprocess(args, *, inference_out=None):
         args.cells,
         args.genes,
         reference=reference_profile,
-        one_block=args.one_block,
     )
     if not len(initial.cell_ids):
         raise ValueError("empty cell map")
     del initial
-    if "block" not in labels:
-        labels["block"] = "cohort"
-    if labels[["cell", "barcode", "block"]].eq("").any().any():
-        raise ValueError("cell, barcode and block labels must be nonempty")
+    if labels[["cell", "barcode"]].eq("").any().any():
+        raise ValueError("cell and barcode labels must be nonempty")
     tools = {}
     needed = (["cellsnp-lite", "bcftools"] if not args.cellsnp_dir else []) + (
         [] if args.phased_vcf else ["bcftools", "java"]
@@ -319,9 +311,7 @@ def preprocess(args, *, inference_out=None):
         if fitted_reference:
             write_fit(out / "reference_fit", fitted_reference)
             status["reference_fit"] = str(out / "reference_fit")
-        labels[["cell", "barcode", "block"]].to_csv(
-            out / "cells.tsv", sep="\t", index=False
-        )
+        labels[["cell", "barcode"]].to_csv(out / "cells.tsv", sep="\t", index=False)
         (out / "cell_barcodes.txt").write_text("\n".join(labels.cell) + "\n")
         cellsnp = args.cellsnp_dir.resolve() if args.cellsnp_dir else out / "cellsnp"
         LOG.info(

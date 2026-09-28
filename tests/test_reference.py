@@ -257,7 +257,6 @@ def test_fit_reference_cli_and_selected_cells(tmp_path):
         main(
             [
                 *bad,
-                "--one-block",
                 "--reference-method",
                 "regional_consensus",
                 "--reference-iterations",

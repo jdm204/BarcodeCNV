@@ -178,7 +178,6 @@ def load_cells(
     reference=None,
     alleles=None,
     genetic_map=None,
-    one_block=False,
 ):
     counts, gene_ids, cell_ids = read_10x(matrix)
     labels = table(cells).rename(
@@ -188,12 +187,6 @@ def load_cells(
         raise ValueError("cell table needs cell and barcode columns")
     if labels.cell.duplicated().any():
         raise ValueError("duplicate cell annotations")
-    if "block" not in labels:
-        if not one_block:
-            raise ValueError(
-                "provide a block column, or explicitly use --one-block for one exchangeable cohort"
-            )
-        labels["block"] = "cohort"
     ix = pd.Index(cell_ids).get_indexer(labels.cell)
     if np.any(ix < 0):
         raise ValueError("annotated cells are missing from expression matrix")
@@ -314,7 +307,6 @@ def load_cells(
         np.array([fractions.get(g, 0.0) for g in gene_table.gene]),
         tuple(labels.cell),
         tuple(labels.barcode),
-        tuple(labels.block),
         libraries,
         counts,
         a,

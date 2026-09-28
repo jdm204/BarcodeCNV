@@ -122,7 +122,7 @@ def plot_signal(result, path):
         ax.text(
             0.5,
             0.5,
-            "Not assessable: declared blocks allow no label exchanges",
+            "Not assessable: fewer than two lineage barcodes",
             ha="center",
             va="center",
             transform=ax.transAxes,
@@ -271,7 +271,7 @@ def plot_run(result, path, signal=None):
         title += (
             f"\nBarcode signal permutation p = {signal['pvalue']:.4g}"
             if signal["pvalue"] is not None
-            else "\nBarcode signal: not assessable within declared blocks"
+            else "\nBarcode signal: not assessable with fewer than two lineage barcodes"
         )
     fig.suptitle(title, fontsize=14)
     fig.savefig(path, dpi=220, bbox_inches="tight", facecolor="white")

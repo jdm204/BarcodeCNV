@@ -35,7 +35,6 @@ def example_bundle():
         np.full(genes, 0.002),
         tuple(f"cell{i}" for i in range(cells)),
         tuple(f"0{i}" for i in membership),
-        tuple(["sample"] * cells),
         np.full(cells, 10000.0),
         csc_matrix(counts),
         csc_matrix((0, cells)),
@@ -68,16 +67,39 @@ def test_infercnv_matches_r_reference(mode, width):
     )
 
 
-def test_permutation_signal_and_block_constraints():
+def test_permutation_signal_and_single_barcode():
     data = example_bundle()
     result = barcode_signal_test(data, permutations=39, seed=20)
     assert result["pvalue"] == 1 / 40
-    restricted = replace(data, blocks=data.barcode_labels)
+    restricted = replace(data, barcode_labels=("only",) * len(data.cell_ids))
     result = barcode_signal_test(restricted, permutations=39)
     assert result["status"] == "unassessable" and result["pvalue"] is None
     # Identical cells have exactly the same score under every permutation.
     same = replace(data, expression=csc_matrix(np.full(data.expression.shape, 20)))
     assert barcode_signal_test(same, permutations=19)["pvalue"] == 1.0
+
+
+def test_bundle_v2_and_legacy_v1_share_single_cohort_behavior(tmp_path):
+    data = example_bundle()
+    path = tmp_path / "cells.h5"
+    write_bundle(path, data)
+    with h5py.File(path, "r+") as f:
+        assert f.attrs["pbpc_schema"] == "cell-counts-v2"
+        assert set(f["cells"]) == {"id", "barcode", "library"}
+        # Mimic a previously saved v1 input without retaining a runtime field.
+        f.attrs["pbpc_schema"] = "cell-counts-v1"
+        f.create_dataset(
+            "cells/block", data=np.array(["cohort"] * len(data.cell_ids), dtype="S")
+        )
+    loaded = read_bundle(path)
+    np.testing.assert_array_equal(loaded.libraries, data.libraries)
+    np.testing.assert_array_equal(
+        loaded.expression.toarray(), data.expression.toarray()
+    )
+    np.testing.assert_array_equal(
+        barcode_signal_test(loaded, permutations=19)["null_scores"],
+        barcode_signal_test(data, permutations=19)["null_scores"],
+    )
 
 
 def test_gene_identity_preserved_when_multiple_genes_share_marker():
@@ -272,9 +294,7 @@ def test_10x_loading_preserves_library_universe_and_phased_alleles(tmp_path, hdf
             }
         ).to_csv(source / "features.tsv", sep="\t", header=False, index=False)
         (source / "barcodes.tsv").write_text("c2\nc1\n")
-    (tmp_path / "cells.tsv").write_text(
-        "cell\tbarcode\tblock\nc1\t01\tsample\nc2\t02\tsample\n"
-    )
+    (tmp_path / "cells.tsv").write_text("cell\tbarcode\nc1\t01\nc2\t02\n")
     (tmp_path / "genes.tsv").write_text(
         "gene\tchromosome\tposition\nENSG1\t1\t10\nENSG2\t1\t20\n"
     )
@@ -342,7 +362,6 @@ def raw_inputs(tmp_path):
         str(tmp_path / "reference.tsv"),
         "--alleles",
         str(tmp_path / "alleles.tsv"),
-        "--one-block",
     ]
 
 
@@ -421,7 +440,6 @@ def test_signal_accepts_raw_counts_without_reference(tmp_path, raw_inputs):
         (["--matrix", "counts", "--cells", "cells", "--genes", "genes"], "--reference"),
         (["bundle.h5", "--matrix", "counts"], "not both"),
         (["bundle.h5", "--alleles", "alleles"], "not both"),
-        (["bundle.h5", "--one-block"], "not both"),
     ],
 )
 def test_cli_rejects_incomplete_or_mixed_input_modes(tmp_path, capsys, inputs, message):
@@ -499,7 +517,6 @@ def preprocessing_inputs(tmp_path, raw_inputs):
         str(tmp_path / "genes.tsv"),
         "--genetic-map",
         str(maps),
-        "--one-block",
         "--chromosomes",
         "1,2,3",
         "--cellsnp-dir",

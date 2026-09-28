@@ -36,7 +36,6 @@ class CellBundle:
     reference_fractions: np.ndarray
     cell_ids: tuple[str, ...]
     barcode_labels: tuple[str, ...]
-    blocks: tuple[str, ...]
     libraries: np.ndarray
     expression: csc_matrix
     h1: csc_matrix
@@ -44,7 +43,7 @@ class CellBundle:
     het: np.ndarray
 
     def __post_init__(self):
-        for name in ("gene_ids", "cell_ids", "barcode_labels", "blocks"):
+        for name in ("gene_ids", "cell_ids", "barcode_labels"):
             labels = tuple(getattr(self, name))
             if any(not isinstance(x, str) or not x for x in labels):
                 raise ValueError(f"invalid {name}")
@@ -71,7 +70,6 @@ class CellBundle:
             object.__setattr__(self, name, a)
         if (
             len(self.barcode_labels) != c
-            or len(self.blocks) != c
             or np.any(self.gene_markers >= len(self.grid))
             or np.any(np.diff(self.gene_markers) < 0)
         ):
@@ -173,7 +171,7 @@ def read_sparse(f):
 def write_bundle(path, data):
     """Write a fresh bundle. IDs remain strings, including numeric-looking IDs."""
     with h5py.File(path, "x") as f:
-        f.attrs["pbpc_schema"] = "cell-counts-v1"
+        f.attrs["pbpc_schema"] = "cell-counts-v2"
 
         def strings(key, x):
             f.create_dataset(key, data=np.array(x, dtype=h5py.string_dtype()))
@@ -194,7 +192,6 @@ def write_bundle(path, data):
             ("genes/id", data.gene_ids),
             ("cells/id", data.cell_ids),
             ("cells/barcode", data.barcode_labels),
-            ("cells/block", data.blocks),
         ):
             strings(key, value)
         for name in ("expression", "h1", "h2"):
@@ -203,8 +200,8 @@ def write_bundle(path, data):
 
 def read_bundle(path):
     with h5py.File(path, "r") as f:
-        if f.attrs.get("pbpc_schema") != "cell-counts-v1":
-            raise ValueError("expected PBPC cell-counts-v1 bundle")
+        if f.attrs.get("pbpc_schema") not in ("cell-counts-v1", "cell-counts-v2"):
+            raise ValueError("expected PBPC cell-counts-v1 or cell-counts-v2 bundle")
 
         def strings(key):
             return tuple(f[key].asstr()[:])
@@ -222,7 +219,6 @@ def read_bundle(path):
             f["genes/reference_fraction"][:],
             strings("cells/id"),
             strings("cells/barcode"),
-            strings("cells/block"),
             f["cells/library"][:],
             *(read_sparse(f["counts/" + k]) for k in ("expression", "h1", "h2")),
             f["snps/het"][:],

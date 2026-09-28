@@ -6,7 +6,7 @@ From the Python project directory:
 uv sync --locked
 uv run barcodecnv setup --genome hg38
 uv run barcodecnv run --outs /path/to/cellranger/outs \
-  --cells cells.tsv --one-block --out results
+  --cells cells.tsv --out results
 ```
 
 `setup` installs preprocessing tools and downloads hg38 resources plus the
@@ -16,8 +16,7 @@ This initial distribution targets human B-cell data. Other built-in cell-type
 panels are deferred; explicit `--reference` and `--reference-panel` overrides
 remain available. No Julia checkout, R installation, root privileges or shell
 activation is required. Python/uv and an internet connection are needed for setup.
-Use `--one-block` only for an exchangeable cohort; otherwise include the `block`
-column in the cell/barcode map.
+Each run uses one donor and treats the selected cells as one cohort.
 
 ## Tools and data
 

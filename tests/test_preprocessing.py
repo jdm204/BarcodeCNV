@@ -140,7 +140,6 @@ def prepared_args(root, cs, phased):
         str(cs),
         "--phased-vcf",
         str(phased),
-        "--one-block",
         "--chromosomes",
         "1",
         "--out",

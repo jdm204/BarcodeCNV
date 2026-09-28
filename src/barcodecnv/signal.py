@@ -97,18 +97,12 @@ def barcode_signal_test(bundle, *, permutations=199, bin_width_bp=10_000_000, se
         raise ValueError("permutations must be positive")
     features = signal_features(bundle, bin_width_bp)
     labels = bundle.membership
-    blocks = [
-        np.flatnonzero(np.array(bundle.blocks) == b) for b in sorted(set(bundle.blocks))
-    ]
     observed = features.score(labels)
-    assessable = any(len(np.unique(labels[ix])) > 1 for ix in blocks)
+    assessable = len(bundle.barcodes) > 1
     rng = np.random.default_rng(seed)
     null = np.empty((permutations if assessable else 0, 3))
     for r in range(len(null)):
-        shuffled = labels.copy()
-        for ix in blocks:
-            shuffled[ix] = rng.permutation(labels[ix])
-        null[r] = features.score(shuffled)
+        null[r] = features.score(rng.permutation(labels))
     tolerance = 1e-9 * max(1.0, abs(observed[0]))
     p = (
         float((1 + np.sum(null[:, 0] >= observed[0] - tolerance)) / (permutations + 1))
@@ -127,5 +121,4 @@ def barcode_signal_test(bundle, *, permutations=199, bin_width_bp=10_000_000, se
         permutations=len(null),
         seed=seed,
         barcode_sizes=np.bincount(labels).tolist(),
-        block_sizes=[len(ix) for ix in blocks],
     )

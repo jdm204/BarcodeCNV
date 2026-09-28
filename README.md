@@ -11,8 +11,7 @@ Choose one installation route below; no manual repository clone is needed.
 These instructions support **Linux x86_64** and start from **hg38 Cell Ranger
 outputs**, using the B-cell normal expression panel by default. Supply a
 `cells.tsv` file with `cell` and `barcode` columns mapping cell IDs to lineage
-barcodes. Use `--one-block` only for an exchangeable cohort; otherwise include
-a `block` column and omit that option.
+barcodes. Each run treats the selected cells as one cohort from one donor.
 
 ## Conda / Mamba
 
@@ -23,7 +22,7 @@ conda create -n barcodecnv --override-channels --strict-channel-priority \
 conda activate barcodecnv
 barcodecnv setup --tools path --genome hg38
 barcodecnv run --outs /path/to/cellranger/outs \
-  --cells cells.tsv --one-block --out results
+  --cells cells.tsv --out results
 ```
 
 For Mamba, replace `conda` with `mamba` in the create and activate commands.
@@ -38,7 +37,7 @@ pixi global install \
   -c conda-forge -c bioconda barcodecnv
 barcodecnv setup --tools path --genome hg38
 barcodecnv run --outs /path/to/cellranger/outs \
-  --cells cells.tsv --one-block --out results
+  --cells cells.tsv --out results
 ```
 
 Pixi installs the same conda package and exposes `barcodecnv` without requiring
@@ -47,14 +46,14 @@ channel details.
 
 ## uv
 
-With uv and Git installed, install the tagged Python release directly from GitHub:
+With uv and Git installed, install the current Python source directly from GitHub:
 
 ```sh
 uv tool install --python 3.13 \
-  "git+https://github.com/jdm204/BarcodeCNV.git@v0.1.0"
+  "git+https://github.com/jdm204/BarcodeCNV.git"
 barcodecnv setup --genome hg38
 barcodecnv run --outs /path/to/cellranger/outs \
-  --cells cells.tsv --one-block --out results
+  --cells cells.tsv --out results
 ```
 
 uv manages an isolated Python environment. Here, `setup` also installs
@@ -88,7 +87,7 @@ For hg38 B-cell data, first fetch the resources and native tools, then run:
 ```sh
 uv run barcodecnv setup --genome hg38
 uv run barcodecnv run --outs /path/to/cellranger/outs \
-  --cells cells.tsv --one-block --out results
+  --cells cells.tsv --out results
 ```
 
 This prints stages to the console, preprocesses the BAM/counts and then runs
@@ -106,7 +105,7 @@ To run the stages separately:
 
 ```sh
 uv run barcodecnv preprocess --outs /path/to/cellranger/outs \
-  --cells cells.tsv --reference reference.tsv --one-block --out prepared_sample
+  --cells cells.tsv --reference reference.tsv --out prepared_sample
 uv run barcodecnv infer prepared_sample/prepared.h5 --out results
 ```
 
@@ -217,10 +216,8 @@ numeric-looking barcodes. Physical coordinates are one-based.
   `barcodes.tsv`, optionally gzipped), or a 10x HDF5 matrix. Only Gene Expression
   features enter RNA library totals. Whole-assay library sizes are computed
   before selecting annotated/reference-matched genes.
-* **Cells:** `cell`, `barcode`, `block`. The existing `cell_barcode` and
-  `lineage_barcode` aliases are accepted. Blocks define exchangeability for
-  permutations (e.g. sample/batch). For one exchangeable cohort, `--one-block`
-  explicitly substitutes a single block when that column is absent.
+* **Cells:** `cell`, `barcode`. The existing `cell_barcode` and
+  `lineage_barcode` aliases are accepted. All selected cells form one cohort.
 * **Genes:** GTF/GTF.gz, or `gene`, `chromosome`, `position` (alternatively
   `start`, `end`; their integer midpoint is used). Version suffixes are removed
   from gene IDs; ambiguous duplicates are rejected. Genes are sorted genomically.
@@ -239,10 +236,11 @@ numeric-looking barcodes. Physical coordinates are one-based.
 Only annotated cells are retained. Reference-supported annotated genes present
 in the assay are used; the loader performs no CN-based gene selection. The
 barcode/SNP count records are retained independently of gene count records.
-The prepared `cell-counts-v1` bundle stores sparse CSC matrices (feature × cell),
+The prepared `cell-counts-v2` bundle stores sparse CSC matrices (feature × cell),
 explicit cell/gene/SNP labels, original library sizes and zero-based grid indices.
 `CellBundle`, `read_bundle` and `write_bundle` in `barcodecnv.bundle` provide the
-same boundary for programmatic loading.
+same boundary for programmatic loading. Existing v1 bundles remain readable;
+additional legacy cell metadata is ignored.
 
 ### Outputs
 
@@ -257,7 +255,7 @@ same boundary for programmatic loading.
   white. No ground truth is used in this figure.
 * `signal.png`, `signal.json`, `signal_null.csv`: observed regional count
   statistic, permutation histogram and Monte Carlo p-value, or an explicit
-  `unassessable` result if the declared blocks allow no label exchanges.
+  `unassessable` result if fewer than two lineage barcodes are present.
 * `groups.csv`, `order.csv`, `weighted_nodes.csv`, `core_nodes.csv`,
   `cn_nodes.csv`, `hf_nodes.csv`: reporting groups, ordering and decision audits. Group zero
   denotes unresolved membership. `phase_group` is a separate pooling decision.
@@ -286,11 +284,11 @@ same boundary for programmatic loading.
 * `run.json`: parameters, numerical convergence, runtime and completion status.
 
 The association diagnostic tests whether barcode labels explain regional count
-structure within the declared blocks. Expression confounding can contribute;
+structure across the selected cells. Expression confounding can contribute;
 it does not establish CN causation or general data quality. A nonsignificant
 result does not prove the absence of useful barcode information. The statistic
 and centring are fixed without barcode labels; permutations preserve barcode
-cell counts within every block. Only the joint depth+allele statistic receives
+cell counts across the cohort. Only the joint depth+allele statistic receives
 the formal permutation p-value.
 
 ## Design and ownership

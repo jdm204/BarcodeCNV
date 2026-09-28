@@ -11,14 +11,14 @@ uv run barcodecnv setup --genome hg38
 uv run barcodecnv preprocess \
   --outs /path/to/cellranger/outs \
   --cells /path/to/cell_lineage_map.tsv \
-  --one-block --out /path/to/prepared_sample
+  --out /path/to/prepared_sample
 uv run barcodecnv infer /path/to/prepared_sample/prepared.h5 --out results
 ```
 
 The map needs header columns `cell,barcode` (or
-`cell_barcode,lineage_barcode`), optionally `block`. CSV and TSV are accepted.
-Use `--one-block` only for one exchangeable cohort; otherwise supply blocks for
-the permutation/bootstrap design. These are lineage labels, not inferred clones.
+`cell_barcode,lineage_barcode`). CSV and TSV are accepted. All selected cells
+form one cohort. The signal diagnostic shuffles lineage labels across this cohort,
+preserving barcode cell counts. These are lineage labels, not inferred clones.
 All selected cells must occur in the filtered 10x matrix. Empty labels and
 repeated cell IDs are errors. Barcodes are kept as strings, including leading zeros.
 

@@ -14,13 +14,12 @@ conda create -n barcodecnv --override-channels --strict-channel-priority \
 conda activate barcodecnv
 barcodecnv setup --tools path --genome hg38
 barcodecnv run --outs /path/to/cellranger/outs \
-  --cells cells.tsv --one-block --out results
+  --cells cells.tsv --out results
 ```
 
 The same create command works with `mamba` in place of `conda`. To install a
 specific release, replace `barcodecnv` with `barcodecnv=0.1.0`.
-Use `--one-block` only for an exchangeable cohort; otherwise provide a `block`
-column in the cell map.
+Each run uses one donor and treats the selected cells as one cohort.
 
 For an application installation using pixi:
 

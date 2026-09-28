@@ -8,7 +8,7 @@ other cells in the matrix do not participate. No Julia runtime is used.
 ```bash
 # Cell Ranger data -> fitted reference, phased counts, inference and reports
 uv run barcodecnv run --outs /path/to/cellranger/outs \
-  --cells cells.tsv --reference-panel /path/to/panel --one-block --out results
+  --cells cells.tsv --reference-panel /path/to/panel --out results
 
 # Fit a reusable reference separately, using existing expression counts
 uv run barcodecnv fit-reference --matrix filtered_feature_bc_matrix/ \
