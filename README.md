@@ -336,9 +336,9 @@ resources = api.setup(genome="hg38")
 expression = api.from_anndata(
     adata,
     cells=barcode_table,
-    layer="counts",                       # Unnormalized UMI counts.
-    gene_id_key="gene_ids",                # Omit if var_names already contain gene IDs.
-    library_size_key="total_counts",       # Whole-assay totals before gene filtering.
+    layer="counts",  # Unnormalized UMI counts.
+    gene_id_key="gene_ids",  # Omit if var_names already contain gene IDs.
+    library_size_key="total_counts",  # Whole-assay totals before gene filtering.
 )
 
 # Resource paths are directly usable. For inspection, resources.load_genes()
@@ -351,14 +351,16 @@ reference = api.fit_reference(
 print(reference.weights)
 
 prepared = api.preprocess(
-    expression, bam="/path/to/sample.bam",
-    reference=reference, config=resources,
+    expression,
+    bam="/path/to/sample.bam",
+    reference=reference,
+    config=resources,
 )
 result = api.infer(prepared, bootstraps=64, seed=42)
 
-result.groups_table()                    # Labelled barcode membership and stability.
-result.group_cn_table()                  # Gene-level pooled CN, consensus and conflicts.
-result.plot_summary()                    # Open Matplotlib Figure.
+result.groups_table()  # Labelled barcode membership and stability.
+result.group_cn_table()  # Gene-level pooled CN, consensus and conflicts.
+result.plot_summary()  # Open Matplotlib Figure.
 ```
 
 The combined analysis call, allowing preprocessing to fit the configured panel,
@@ -371,8 +373,10 @@ route. It returns the same type and retains any fitted reference:
 
 ```python
 prepared = api.prepare(
-    expression, genes=resources.genes, reference=reference,
-    alleles=allele_table,                  # DataFrame or count-table path.
+    expression,
+    genes=resources.genes,
+    reference=reference,
+    alleles=allele_table,  # DataFrame or count-table path.
 )
 # Alleles must supply genetic_cm; otherwise also pass genetic_map=resources.genetic_map.
 result = api.infer(prepared)
@@ -444,11 +448,11 @@ raise an error. Large tables can be restricted to a single barcode or group.
 membership = result.groups_table()
 barcode = membership.barcode.iloc[0]
 barcode_cn = result.barcode_cn_table(barcode=barcode)
-group_cn = result.group_cn_table()         # Or group=<a resolved group ID>.
-segments = result.group_segments_table()   # Runs of marginal pooled MAP calls.
+group_cn = result.group_cn_table()  # Or group=<a resolved group ID>.
+segments = result.group_segments_table()  # Runs of marginal pooled MAP calls.
 
 # Raw arrays remain available, with explicit matching labels:
-probabilities = result.probabilities       # barcode × marker × CN class.
+probabilities = result.probabilities  # barcode × marker × CN class.
 barcode_ids = membership.barcode
 markers = result.marker_table()
 class_names = result.class_names
@@ -674,6 +678,7 @@ fragmented RBL1 calls; direct pseudobulking reduces this fragmentation.
 ```sh
 cd barcodecnv
 uv sync --locked
+uv run pre-commit install
 uv run ruff check .
 uv run ruff format --check .
 uv run pytest
@@ -681,7 +686,13 @@ uv run pytest
 
 Python 3.13 is selected by `.python-version`; `uv.lock` pins the development
 environment. Runtime dependencies are NumPy, SciPy, Numba, pandas, h5py and
-Matplotlib; development adds pytest and Ruff.
+Matplotlib; development adds pytest, Ruff and pre-commit.
+
+Install the Git hooks once per checkout with `uv run pre-commit install`.
+Before each commit, they apply safe Ruff lint fixes and formatting to staged
+files, including Python code blocks in Markdown. If files change, review and
+stage the fixes, then commit again. The hooks use the Ruff version in `uv.lock`,
+matching CI. To check all tracked files, run `uv run pre-commit run --all-files`.
 
 Ruff owns formatting, import sorting and linting for the package, tests, figure
 scripts and validation scripts. Configuration lives in `pyproject.toml`, targeting
