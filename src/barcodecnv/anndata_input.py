@@ -1,33 +1,10 @@
 """Adapt AnnData counts to the shared loaders without importing Scanpy."""
 
-import hashlib
-import json
-from dataclasses import dataclass
-
 import numpy as np
 import pandas as pd
 from scipy.sparse import csc_matrix, issparse
 
-
-@dataclass(frozen=True)
-class ExpressionInput:
-    counts: csc_matrix  # genes by cells, owned by this adapter
-    genes: tuple[str, ...]
-    cells: tuple[str, ...]
-    libraries: np.ndarray
-    metadata: dict
-
-    def provenance(self):
-        digest = hashlib.sha256()
-        digest.update(json.dumps([self.genes, self.cells]).encode())
-        for values, dtype in (
-            (self.counts.data, "<f8"),
-            (self.counts.indices, "<i8"),
-            (self.counts.indptr, "<i8"),
-            (self.libraries, "<f8"),
-        ):
-            digest.update(np.asarray(values, dtype=dtype).tobytes())
-        return dict(self.metadata, sha256=digest.hexdigest())
+from .expression import ExpressionInput
 
 
 def from_anndata(
@@ -49,12 +26,12 @@ def from_anndata(
         raise ValueError(
             "AnnData cell IDs must be unique, nonempty strings matching BAM CB tags"
         )
-    labels = table(cells).rename(
+    labels = (pd.DataFrame({"cell": ids}) if cells is None else table(cells)).rename(
         columns={"cell_barcode": "cell", "lineage_barcode": "barcode"}
     )
-    if not {"cell", "barcode"}.issubset(labels):
-        raise ValueError("cell table needs cell and barcode columns")
-    labels = labels[["cell", "barcode"]]
+    if "cell" not in labels:
+        raise ValueError("cell table needs a cell column")
+    labels = labels[["cell", "barcode"] if "barcode" in labels else ["cell"]]
     if (
         labels.isna().any().any()
         or labels.eq("").any().any()
@@ -141,5 +118,10 @@ def from_anndata(
         genes=len(genes),
     )
     return ExpressionInput(
-        counts, genes, tuple(selected_ids), libraries, metadata
-    ), labels
+        counts,
+        genes,
+        tuple(selected_ids),
+        libraries,
+        tuple(labels.barcode) if "barcode" in labels else None,
+        metadata,
+    )

@@ -77,7 +77,8 @@ not integrated into CN probabilities.
 `fit-reference` writes directly to its output directory. `preprocess` and
 count-input `infer` write a `reference_fit/` subdirectory; end-to-end `run`
 therefore stores the fit in `OUT/preprocessing/reference_fit/`. `prepare --out
-sample.h5` uses a sibling `sample.h5.reference_fit/` directory.
+prepared` writes `prepared/prepared.h5`, its preparation provenance and
+`prepared/reference_fit/`.
 
 - `reference.tsv`: full-universe gene fractions, reusable with `--reference`.
 - `weights.tsv`: mixture weights alongside the original profile metadata.

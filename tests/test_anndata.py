@@ -15,7 +15,7 @@ from test_cli import raw_inputs as raw_inputs
 from test_reference import write_panel
 
 from barcodecnv import api
-from barcodecnv.anndata_input import from_anndata
+from barcodecnv.api import from_anndata
 from barcodecnv.bundle import read_bundle
 
 
@@ -36,9 +36,9 @@ def test_filtered_view_aligns_cells_genes_and_whole_library_totals(annotated):
     labels = pd.DataFrame(
         {"cell": ["c0", "filtered-out", "c2"], "barcode": ["01", "02", "03"]}
     )
-    expression, selected = from_anndata(
+    expression = from_anndata(
         view,
-        labels,
+        cells=labels,
         layer="counts",
         gene_id_key="gene_ids",
         library_size_key="total_counts",
@@ -47,9 +47,10 @@ def test_filtered_view_aligns_cells_genes_and_whole_library_totals(annotated):
     assert expression.genes == ("g1", "g0")
     np.testing.assert_array_equal(expression.counts.toarray(), [[23, 3], [19, 2]])
     np.testing.assert_array_equal(expression.libraries, [71, 12])
-    assert selected.barcode.tolist() == ["03", "01"]
+    assert expression.barcode_labels == ("03", "01")
     assert expression.metadata["excluded_table_cells"] == 1
-    expression.counts.data[:] = 0
+    with pytest.raises(ValueError, match="read-only"):
+        expression.counts.data[:] = 0
     np.testing.assert_array_equal(view.layers["counts"].toarray(), [[23, 19], [3, 2]])
     assert view.is_view
 
@@ -59,30 +60,30 @@ def test_raw_preserves_its_gene_axis_after_filtering(annotated):
     annotated.X = np.log1p(annotated.X.toarray())
     view = annotated[[2, 0], [1]]
     labels = pd.DataFrame({"cell": ["c0", "c2"], "barcode": ["b", "a"]})
-    counts, _ = from_anndata(view, labels, use_raw=True, gene_id_key="gene_ids")
+    counts = from_anndata(view, cells=labels, use_raw=True, gene_id_key="gene_ids")
     assert counts.genes == ("g0", "g1", "g2")
     np.testing.assert_array_equal(counts.counts.toarray(), [[19, 2], [23, 3], [29, 7]])
     np.testing.assert_array_equal(counts.libraries, [71, 12])
     with pytest.raises(ValueError, match="raw nonnegative integer"):
-        from_anndata(view, labels)
+        from_anndata(view, cells=labels)
     with pytest.raises(ValueError, match="either layer or use_raw"):
-        from_anndata(view, labels, layer="counts", use_raw=True)
+        from_anndata(view, cells=labels, layer="counts", use_raw=True)
 
 
 def test_rejects_invalid_exposures_and_ambiguous_ids(annotated):
     labels = pd.DataFrame({"cell": ["c0"], "barcode": ["a"]})
     annotated.obs["bad_totals"] = [11, 41, 71]
     with pytest.raises(ValueError, match="whole-assay totals"):
-        from_anndata(annotated, labels, library_size_key="bad_totals")
+        from_anndata(annotated, cells=labels, library_size_key="bad_totals")
     with pytest.raises(ValueError, match="unique cells"):
-        from_anndata(annotated, pd.concat([labels, labels]))
+        from_anndata(annotated, cells=pd.concat([labels, labels]))
     with pytest.raises(ValueError, match="nonempty"):
-        from_anndata(annotated, labels.assign(barcode=None))
+        from_anndata(annotated, cells=labels.assign(barcode=None))
     with pytest.raises(ValueError, match="no shared cells"):
-        from_anndata(annotated, labels.assign(cell="absent"))
+        from_anndata(annotated, cells=labels.assign(cell="absent"))
     annotated.var["gene_ids"] = ["ENSG0001.1", "ENSG0001.2", "g2"]
     with pytest.raises(ValueError, match="ambiguous"):
-        from_anndata(annotated, labels, gene_id_key="gene_ids")
+        from_anndata(annotated, cells=labels, gene_id_key="gene_ids")
 
 
 def fixture_anndata():
@@ -146,7 +147,11 @@ def test_preprocess_uses_selected_cells_and_supplied_bam(
         phased_vcf=tmp_path / "phased.vcf.gz",
         snp_vcf=sites,
     )
-    bundle = read_bundle(prepared)
+    bundle = prepared.bundle
+    saved = read_bundle(tmp_path / "prepared/prepared.h5")
+    np.testing.assert_array_equal(
+        saved.expression.toarray(), bundle.expression.toarray()
+    )
     assert bundle.cell_ids == tuple(selected_names)
     assert bundle.barcode_labels == ("02", "00", "04")
     assert bundle.gene_ids == ("g1", "g4", "g50")
@@ -154,7 +159,7 @@ def test_preprocess_uses_selected_cells_and_supplied_bam(
     np.testing.assert_array_equal(bundle.libraries, [10000, 10000, 10000])
     np.testing.assert_array_equal(bundle.h1.toarray(), np.full((3, 3), 5))
     np.testing.assert_array_equal(adata.X.toarray(), original)
-    metadata = json.loads((prepared.parent / "preprocessing.json").read_text())
+    metadata = json.loads((tmp_path / "prepared/preprocessing.json").read_text())
     assert metadata["inputs"]["matrix"]["selected_cells"] == 3
     assert metadata["inputs"]["matrix"]["excluded_table_cells"] == 157
     assert metadata["inputs"]["bam"]["path"] == str(bam)
@@ -173,7 +178,7 @@ def test_anndata_run_with_fitted_reference(tmp_path, preprocessing_inputs):
     write_panel(
         panel, [*[f"g{i}" for i in range(60)], "outside"], np.c_[values, values]
     )
-    result = api.run(
+    result = api.run_pipeline(
         adata=adata,
         bam=tmp_path / "cached.bam",
         cells=tmp_path / "cells.tsv",
@@ -189,8 +194,8 @@ def test_anndata_run_with_fitted_reference(tmp_path, preprocessing_inputs):
         draws=16,
         skip_signal=True,
     )
-    assert result["bundle"].cell_ids == tuple(adata.obs_names)
-    assert result["fit"].classes.shape[0] == 4
+    assert result.bundle.cell_ids == tuple(adata.obs_names)
+    assert result.fit.classes.shape[0] == 4
     audit = json.loads(
         (tmp_path / "run/preprocessing/reference_fit/fit.json").read_text()
     )

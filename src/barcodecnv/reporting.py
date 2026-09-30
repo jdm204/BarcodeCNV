@@ -15,7 +15,7 @@ from .model import CLASS_NAMES
 def write_signal(out, result):
     from .plotting import plot_signal
 
-    values = dict(result)
+    values = result.to_dict()
     null = values.pop("null_scores")
     (out / "signal.json").write_text(
         json.dumps(values, indent=2, allow_nan=False) + "\n"
@@ -27,35 +27,23 @@ def write_signal(out, result):
 
 
 def write_run(out, result):
-    bundle = result["bundle"]
-    fit = result["fit"]
-    calls = result["group_calls"]
+    bundle = result.bundle
+    fit = result.fit
+    calls = result.group_calls
     probabilities = fit.classes
-    groups = pd.DataFrame(
-        dict(
-            barcode=bundle.barcodes,
-            cells=result["cells"],
-            group=result["groups"],
-            expression_group=result["expression_groups"],
-            phase_group=result["phase_groups"],
-            pre_hf_group=result["pre_hf_groups"],
-            hf_stability=result["hf_stability"],
-            weighted_stability=result["weighted"]["stability"],
-            core_stability=result["core"]["stability"],
-        )
-    )
+    groups = result.groups_table()
     groups.to_csv(out / "groups.csv", index=False)
-    pd.DataFrame(dict(barcode=np.array(bundle.barcodes)[result["order"]])).to_csv(
+    pd.DataFrame(dict(barcode=np.array(bundle.barcodes)[result.order])).to_csv(
         out / "order.csv", index=False
     )
     for name, rows in (
-        ("weighted", result["weighted"]["nodes"]),
-        ("core", result["core"]["nodes"]),
-        ("cn", result["cn_audit"]),
-        ("hf", result["hf_audit"]),
+        ("weighted", result.weighted["nodes"]),
+        ("core", result.core["nodes"]),
+        ("cn", result.cn_audit),
+        ("hf", result.hf_audit),
     ):
         pd.DataFrame(rows).to_csv(out / f"{name}_nodes.csv", index=False)
-    write_cn_tables(out, bundle, probabilities, result["groups"], calls)
+    write_cn_tables(out, bundle, probabilities, result.groups, calls)
     with h5py.File(out / "result.h5", "w") as f:
         f.attrs["barcodecnv_schema"] = "result-v1"
         for name, value in asdict(fit.posterior.depth_options).items():
@@ -72,7 +60,7 @@ def write_run(out, result):
         )
         f.create_dataset("grid/start", data=bundle.grid.start)
         f.create_dataset("grid/end", data=bundle.grid.end)
-        f.create_dataset("order", data=result["order"])
+        f.create_dataset("order", data=result.order)
         f.create_dataset("probabilities", data=probabilities, compression="gzip")
         f["probabilities"].attrs["axes"] = "barcode,marker,class"
         f.create_dataset("phase", data=fit.pooled_fit.final_phase.phase)
@@ -82,7 +70,7 @@ def write_run(out, result):
                 "barcode_phase", data=fit.posterior.phase, compression="gzip"
             )
             f["barcode_phase"].attrs["axes"] = "barcode,locus"
-        hf = result["hf_features"]
+        hf = result.hf_features
         if hf is not None:
             group = f.create_group("haplotype_features")
             group.create_dataset(
@@ -107,11 +95,11 @@ def write_run(out, result):
             group.attrs["window_bp"] = hf["window_bp"]
             group.attrs["stride_bp"] = hf["stride_bp"]
         for name in ("self_expression", "external_expression"):
-            f.create_dataset(name, data=result[name], compression="gzip")
+            f.create_dataset(name, data=getattr(result, name), compression="gzip")
             f[name].attrs["axes"] = "gene,barcode"
-        if result["distances"] is not None:
+        if result.distances is not None:
             f.create_dataset(
-                "broad_cn_distances", data=result["distances"], compression="gzip"
+                "broad_cn_distances", data=result.distances, compression="gzip"
             )
             f["broad_cn_distances"].attrs["axes"] = "barcode,barcode,draw"
         group = f.create_group("group_calls")
@@ -160,16 +148,16 @@ def write_run(out, result):
         pooled_alpha=pooled.dispersion.parameters.alpha,
         barcode_alpha=fit.dispersion.parameters.alpha,
         dispersion_at_boundary=fit.dispersion.at_boundary,
-        groups=int(result["groups"].max()),
-        unresolved_barcodes=int(np.sum(result["groups"] == 0)),
+        groups=int(result.groups.max()),
+        unresolved_barcodes=int(np.sum(result.groups == 0)),
         model=asdict(fit.posterior.model),
         depth_options=asdict(fit.posterior.depth_options),
         hf_refinement=dict(
-            status=result["hf_status"],
+            status=result.hf_status,
             window_bp=WINDOW_BP,
             stride_bp=BASE_BIN_BP,
             phase="conditional MAP",
-            groups_before=int(result["pre_hf_groups"].max()),
+            groups_before=int(result.pre_hf_groups.max()),
         ),
         barcode_phase_method="joint"
         if fit.posterior.phase.ndim == 2

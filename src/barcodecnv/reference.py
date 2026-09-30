@@ -18,7 +18,8 @@ import pandas as pd
 from scipy.optimize import minimize
 from scipy.special import softmax
 
-from .loading import canonical_genes, read_expression, read_gene_coordinates, table
+from .expression import ExpressionInput
+from .loading import canonical_genes, read_gene_coordinates
 
 LOG = logging.getLogger(__name__)
 
@@ -276,6 +277,11 @@ class FittedReference:
     weights: dict
     audit: dict
 
+    def save(self, out) -> Path:
+        """Export profile, mixture weights and audit to a new directory."""
+        write_fit(out, self)
+        return Path(out)
+
 
 def fit_reference(
     panel,
@@ -390,42 +396,68 @@ def fit_reference(
     )
 
 
-def fit_from_files(matrix, cells, genes, panel_path, **options):
-    counts, ids, cell_ids = read_expression(matrix)
-    labels = table(cells).rename(columns={"cell_barcode": "cell"})
-    if "cell" not in labels or labels.empty or labels.cell.duplicated().any():
-        raise ValueError("reference fitting requires nonempty, unique selected cells")
-    selected = pd.Index(cell_ids).get_indexer(labels.cell)
-    if np.any(selected < 0):
-        raise ValueError("annotated cells are missing from expression matrix")
-    pooled = np.asarray(counts[:, selected].astype(np.float64).sum(axis=1)).ravel()
-    fitted = fit_reference(
-        read_panel(panel_path), ids, pooled, read_gene_coordinates(genes), **options
-    )
-    from .anndata_input import ExpressionInput
-
+def fit_from_expression(expression, genes, panel, **options):
+    """Fit selected expression counts; paths are accepted only as resource adapters."""
+    if not isinstance(expression, ExpressionInput):
+        raise TypeError("expression must be an ExpressionInput")
+    panel = panel if isinstance(panel, ReferencePanel) else read_panel(panel)
+    pooled = np.asarray(expression.counts.astype(np.float64).sum(axis=1)).ravel()
+    coordinates = read_gene_coordinates(genes)
+    fitted = fit_reference(panel, expression.genes, pooled, coordinates, **options)
     inputs = dict(
-        matrix=matrix.provenance()
-        if isinstance(matrix, ExpressionInput)
-        else str(Path(matrix).resolve()),
-        cells="<DataFrame>"
-        if isinstance(cells, pd.DataFrame)
-        else str(Path(cells).resolve()),
-        genes=str(Path(genes).resolve()),
-        selected_cells=len(selected),
+        matrix=expression.provenance(),
+        selected_cells=len(expression.cells),
+        cells_sha256=hashlib.sha256(
+            expression.cell_table().to_csv(index=False).encode()
+        ).hexdigest(),
+        genes_sha256=hashlib.sha256(
+            coordinates.to_csv(index=False).encode()
+        ).hexdigest(),
         pooled_counts_sha256=hashlib.sha256(pooled.astype("<f8").tobytes()).hexdigest(),
     )
-    for name, path in (("cells", cells), ("genes", genes)):
-        if isinstance(path, pd.DataFrame):
-            inputs[name + "_sha256"] = hashlib.sha256(
-                path.to_csv(index=False).encode()
-            ).hexdigest()
-        else:
-            with Path(path).open("rb") as handle:
-                inputs[name + "_sha256"] = hashlib.file_digest(
-                    handle, "sha256"
-                ).hexdigest()
     return replace(fitted, audit={**fitted.audit, "assay_inputs": inputs})
+
+
+def resolve_reference(
+    expression,
+    genes,
+    *,
+    reference=None,
+    reference_panel=None,
+    config=None,
+    genome="hg38",
+    reference_method="global",
+    reference_min_cpm=2.0,
+    reference_iterations=2000,
+    reference_bin_genes=200,
+):
+    """Return a profile and optional fit; shared by preparation and BAM processing."""
+    from .resources import resolve_expression_panel
+
+    if reference is not None and reference_panel is not None:
+        raise ValueError("use either reference or reference_panel, not both")
+    if isinstance(reference, FittedReference):
+        if reference.panel.genome != genome:
+            raise ValueError("fitted reference build differs from genome")
+        return reference.profile, reference
+    if reference_panel is None:
+        return reference, None
+    panel = (
+        reference_panel
+        if isinstance(reference_panel, ReferencePanel)
+        else resolve_expression_panel(reference_panel, config)
+    )
+    fitted = fit_from_expression(
+        expression,
+        genes,
+        panel,
+        genome=genome,
+        method=reference_method,
+        min_cpm=reference_min_cpm,
+        max_iter=reference_iterations,
+        bin_genes=reference_bin_genes,
+    )
+    return fitted.profile, fitted
 
 
 def write_fit(directory, fitted):

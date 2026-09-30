@@ -475,7 +475,8 @@ def setup(
                     resources={k: str(v) for k, v in paths.items()},
                     chromosomes=[c for c in CHROMOSOMES if c in available],
                     expression_panels=expression,
-                    default_reference_panel="b-cells-v1",
+                    default_reference_panel=expression_panel
+                    or previous.get("default_reference_panel"),
                 ),
             )
             state.update(status="complete", config=str(config))

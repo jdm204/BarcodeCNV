@@ -1,9 +1,6 @@
 """Production figures use observed data and fitted summaries, never CN truth."""
 
-import matplotlib
 import numpy as np
-
-matplotlib.use("Agg")
 from matplotlib import pyplot as plt
 from matplotlib.colors import to_rgb
 from matplotlib.patches import Patch
@@ -11,7 +8,17 @@ from matplotlib.patches import Patch
 COLORS = ("#43a58e", "#ec861b", "#3e70b7", "#a454a0")
 
 
-def plot_group_calls(bundle, calls, path):
+def _finish(fig, path, **options):
+    """Return an open figure for notebooks; close only figures saved by this call."""
+    if path is not None:
+        try:
+            fig.savefig(path, dpi=220, **options)
+        finally:
+            plt.close(fig)
+    return fig
+
+
+def plot_group_calls(bundle, calls, path=None):
     """Separate descriptive consensus, model probability, and member conflict."""
     if not len(calls.groups):
         fig, ax = plt.subplots(figsize=(10, 3), layout="constrained")
@@ -94,13 +101,12 @@ def plot_group_calls(bundle, calls, path):
             "Group CN reporting: fixed membership; noise fitted to group pseudobulks; unresolved barcodes excluded",
             fontsize=13,
         )
-    fig.savefig(path, dpi=220, bbox_inches="tight", facecolor="white")
-    plt.close(fig)
+    return _finish(fig, path, bbox_inches="tight", facecolor="white")
 
 
-def plot_signal(result, path):
+def plot_signal(result, path=None):
     fig, ax = plt.subplots(figsize=(7, 4.5), layout="constrained")
-    null = result["null_scores"]
+    null = result.null_scores
     if len(null):
         ax.hist(
             null[:, 0],
@@ -109,13 +115,13 @@ def plot_signal(result, path):
             label="Shuffled cell–barcode labels",
         )
         ax.axvline(
-            result["scores"]["joint"],
+            result.scores.joint,
             color="#b54236",
             linewidth=2,
             label="Observed labels",
         )
         ax.set_title(
-            f"Barcode-associated regional signal: permutation p = {result['pvalue']:.4g}"
+            f"Barcode-associated regional signal: permutation p = {result.pvalue:.4g}"
         )
         ax.legend(fontsize=9)
     else:
@@ -129,16 +135,15 @@ def plot_signal(result, path):
             wrap=True,
         )
     ax.set(xlabel="Regional count statistic", ylabel="Permutations")
-    fig.savefig(path, dpi=220)
-    plt.close(fig)
+    return _finish(fig, path)
 
 
-def plot_run(result, path, signal=None):
+def plot_run(result, path=None, signal=None):
     """Vertically stacked modalities with identical barcode/genomic order."""
-    data = result["bundle"]
-    order = result["order"]
-    labels = result["groups"][order]
-    p = result["fit"].classes[:, data.gene_markers][order]
+    data = result.bundle
+    order = result.order
+    labels = result.groups[order]
+    p = result.fit.classes[:, data.gene_markers][order]
     classes = p.argmax(axis=-1)
     confidence = p.max(axis=-1)
     alpha = np.clip((confidence - 0.25) / 0.75, 0, 1)
@@ -156,18 +161,18 @@ def plot_run(result, path, signal=None):
     panels = [
         (
             "Self-relative smoothed expression",
-            result["self_expression"][:, order].T,
+            result.self_expression[:, order].T,
             "RdBu_r",
             "Relative expression (log2)",
         ),
         (
             "External-reference smoothed expression",
-            result["external_expression"][:, order].T,
+            result.external_expression[:, order].T,
             "RdBu_r",
             "Relative expression (log2)",
         ),
     ]
-    hf = result.get("hf_features")
+    hf = result.hf_features
     if hf is not None:
         lookup = {key: i for i, key in enumerate(hf["regions"])}
         indices = np.array(
@@ -190,7 +195,7 @@ def plot_run(result, path, signal=None):
         )
     cn_title = (
         "CN state; saturation = probability with CN and phase jointly integrated"
-        if result["fit"].posterior.phase.ndim == 2
+        if result.fit.posterior.phase.ndim == 2
         else "CN state; saturation = conditional probability"
     )
     panels.append((cn_title, rgb, None, None))
@@ -202,11 +207,11 @@ def plot_run(result, path, signal=None):
         layout="constrained",
         squeeze=False,
     )
-    stability = np.minimum(result["weighted"]["stability"], result["core"]["stability"])
-    if result.get("hf_stability") is not None:
-        stability = np.minimum(stability, result["hf_stability"])
+    stability = np.minimum(result.weighted["stability"], result.core["stability"])
+    if result.hf_stability is not None:
+        stability = np.minimum(stability, result.hf_stability)
     stability = stability[order]
-    barcodes = [f"{data.barcodes[b]}  ({result['cells'][b]} cells)" for b in order]
+    barcodes = [f"{data.barcodes[b]}  ({result.cells[b]} cells)" for b in order]
     for (ax, strip), (title, values, cmap, colorlabel) in zip(axes, panels):
         if cmap:
             im = ax.imshow(
@@ -269,10 +274,9 @@ def plot_run(result, path, signal=None):
     )
     if signal is not None:
         title += (
-            f"\nBarcode signal permutation p = {signal['pvalue']:.4g}"
-            if signal["pvalue"] is not None
+            f"\nBarcode signal permutation p = {signal.pvalue:.4g}"
+            if signal.pvalue is not None
             else "\nBarcode signal: not assessable with fewer than two lineage barcodes"
         )
     fig.suptitle(title, fontsize=14)
-    fig.savefig(path, dpi=220, bbox_inches="tight", facecolor="white")
-    plt.close(fig)
+    return _finish(fig, path, bbox_inches="tight", facecolor="white")

@@ -316,8 +316,8 @@ def test_run_with_panel_matches_pre_fitted_profile(
         main(["infer", *raw_panel, "--out", str(tmp_path / "raw_infer"), *settings])
         == 0
     )
-    assert main(["prepare", *raw_panel, "--out", str(tmp_path / "prepared.h5")]) == 0
-    assert (tmp_path / "prepared.h5.reference_fit/reference.tsv").is_file()
+    assert main(["prepare", *raw_panel, "--out", str(tmp_path / "prepared")]) == 0
+    assert (tmp_path / "prepared/reference_fit/reference.tsv").is_file()
     with (
         h5py.File(tmp_path / "raw_infer/result.h5") as a,
         h5py.File(tmp_path / "panel_run/inference/result.h5") as b,

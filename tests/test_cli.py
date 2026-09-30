@@ -70,13 +70,13 @@ def test_infercnv_matches_r_reference(mode, width):
 def test_permutation_signal_and_single_barcode():
     data = example_bundle()
     result = barcode_signal_test(data, permutations=39, seed=20)
-    assert result["pvalue"] == 1 / 40
+    assert result.pvalue == 1 / 40
     restricted = replace(data, barcode_labels=("only",) * len(data.cell_ids))
     result = barcode_signal_test(restricted, permutations=39)
-    assert result["status"] == "unassessable" and result["pvalue"] is None
+    assert result.status == "unassessable" and result.pvalue is None
     # Identical cells have exactly the same score under every permutation.
     same = replace(data, expression=csc_matrix(np.full(data.expression.shape, 20)))
-    assert barcode_signal_test(same, permutations=19)["pvalue"] == 1.0
+    assert barcode_signal_test(same, permutations=19).pvalue == 1.0
 
 
 def test_bundle_v2_and_legacy_v1_share_single_cohort_behavior(tmp_path):
@@ -97,8 +97,8 @@ def test_bundle_v2_and_legacy_v1_share_single_cohort_behavior(tmp_path):
         loaded.expression.toarray(), data.expression.toarray()
     )
     np.testing.assert_array_equal(
-        barcode_signal_test(loaded, permutations=19)["null_scores"],
-        barcode_signal_test(data, permutations=19)["null_scores"],
+        barcode_signal_test(loaded, permutations=19).null_scores,
+        barcode_signal_test(data, permutations=19).null_scores,
     )
 
 
@@ -368,8 +368,9 @@ def raw_inputs(tmp_path):
 def test_one_command_matches_prepare_then_run(tmp_path, raw_inputs):
     import hashlib
 
-    prepared = tmp_path / "separate.h5"
-    assert main(["prepare", *raw_inputs, "--out", str(prepared)]) == 0
+    directory = tmp_path / "prepared"
+    prepared = directory / "prepared.h5"
+    assert main(["prepare", *raw_inputs, "--out", str(directory)]) == 0
     direct = tmp_path / "direct"
     staged = tmp_path / "staged"
     settings = [

@@ -183,7 +183,12 @@ def parser():
         help="Load existing count and annotation tables into a cell-count bundle (no BAM processing)",
     )
     add_count_inputs(prepare, required=True)
-    prepare.add_argument("--out", required=True, type=Path, help="new HDF5 bundle file")
+    prepare.add_argument(
+        "--out",
+        required=True,
+        type=Path,
+        help="new directory for prepared counts, reference fit and provenance",
+    )
     for name, description in (
         ("signal", "Test barcode-associated regional signal; no CN inference"),
         (
@@ -221,7 +226,15 @@ def main(argv=None):
         if "no_" + flag in values:
             values[flag] = not values.pop("no_" + flag)
     try:
-        getattr(api, command.replace("-", "_"))(**values)
+        if command == "setup" and values.pop("dry_run", False):
+            from .resources import setup
+
+            setup(**values, dry_run=True)
+        else:
+            operation = (
+                "run_pipeline" if command == "run" else command.replace("-", "_")
+            )
+            getattr(api, operation)(**values)
     except (
         ValueError,
         OSError,

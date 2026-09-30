@@ -13,15 +13,24 @@ import shlex
 import shutil
 import subprocess
 import sys
+from collections.abc import Mapping
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import pandas as pd
 
-from .anndata_input import ExpressionInput, from_anndata
 from .bundle import write_bundle
+from .expression import ExpressionInput, resolve_expression
 from .loading import chromosome, chromosome_key, load_cells, table
 from .preprocessing_io import export_alleles, phased_sites, pooled_vcf, vcf_records
-from .reference import add_reference_arguments, fit_from_files, write_fit
+from .reference import (
+    FittedReference,
+    ReferencePanel,
+    add_reference_arguments,
+    resolve_reference,
+    write_fit,
+)
+from .results import PreparedResult
 
 LOG = logging.getLogger(__name__)
 
@@ -62,6 +71,24 @@ def resolve_resource(directory, chrom, kind):
 def provenance(path, *, digest=False):
     if isinstance(path, ExpressionInput):
         return path.provenance()
+    if isinstance(path, FittedReference):
+        return dict(
+            kind="fitted_reference", profile=provenance(path.profile), audit=path.audit
+        )
+    if isinstance(path, ReferencePanel):
+        return dict(
+            kind="reference_panel",
+            id=path.id,
+            genome=path.genome,
+            sha256=hashlib.sha256(path.expression.tobytes()).hexdigest(),
+        )
+    if isinstance(path, Mapping):
+        return dict(
+            kind="reference_profile",
+            sha256=hashlib.sha256(
+                json.dumps(dict(path), sort_keys=True).encode()
+            ).hexdigest(),
+        )
     if isinstance(path, pd.DataFrame):
         return dict(
             kind="table",
@@ -200,6 +227,7 @@ def discover_config(explicit=None):
 
 
 def preprocess(
+    input=None,
     *,
     outs=None,
     adata=None,
@@ -208,8 +236,8 @@ def preprocess(
     use_raw=False,
     gene_id_key=None,
     library_size_key=None,
-    cells,
-    out,
+    cells=None,
+    out=None,
     reference=None,
     reference_panel=None,
     config=None,
@@ -230,10 +258,16 @@ def preprocess(
     reference_iterations=2000,
     reference_bin_genes=200,
     inference_out=None,
-):
-    """Preprocess one donor's counts and BAM; return the prepared bundle Path.
+) -> PreparedResult:
+    """Preprocess one donor's counts and BAM; return a PreparedResult.
 
-    Supply either outs, or adata plus bam. For AnnData, cells is a table path or
+    Supply an ExpressionInput plus bam, adata plus bam, or outs.
+    With out, keep the native-tool work directory, logs and prepared.h5.
+    Without out, use temporary files and remove them on return or failure.
+    The result retains .bundle, .reference_fit and .provenance in memory after
+    temporary-file cleanup. .output_directory is None when out is omitted.
+    reference accepts a FittedReference, profile mapping or file.
+    genes accepts an annotation DataFrame or file. For AnnData, cells is a table path or
     DataFrame with cell/barcode columns; the intersection with obs_names is used.
     layer selects raw counts from a layer; use_raw selects raw.X and raw.var.
     Otherwise X is used. gene_id_key selects a var column instead of var_names.
@@ -246,39 +280,49 @@ def preprocess(
     are alternatives. Existing output directories are never overwritten.
     """
     arguments = dict(locals())
-    if (outs is None) == (adata is None):
-        raise ValueError("provide either outs or adata with bam, not both")
-    if outs is not None and (
-        bam is not None
-        or layer is not None
-        or use_raw
-        or gene_id_key is not None
-        or library_size_key is not None
-    ):
-        raise ValueError("bam and AnnData options require adata")
-    if adata is not None:
+    if out is None:
+        # Native tools require files. Reuse the persistent workflow in an owned
+        # temporary workspace, with identical validation and error propagation.
+        with TemporaryDirectory(prefix="barcodecnv-preprocess-") as temporary:
+            arguments["out"] = Path(temporary) / "work"
+            prepared = preprocess(**arguments)
+        prepared.output_directory = None
+        prepared.provenance["workspace"]["retained"] = False
+        return prepared
+    if outs is not None:
+        if input is not None or adata is not None or bam is not None:
+            raise ValueError("provide outs or expression/adata with bam, not both")
+        outs = Path(outs)
+        matrix_path = outs / "filtered_feature_bc_matrix.h5"
+        if not matrix_path.is_file():
+            matrix_path = outs / "filtered_feature_bc_matrix"
+        matrix = resolve_expression(
+            matrix=matrix_path,
+            cells=cells,
+            layer=layer,
+            use_raw=use_raw,
+            gene_id_key=gene_id_key,
+            library_size_key=library_size_key,
+        )
+        bam = outs / "possorted_genome_bam.bam"
+    else:
         if bam is None:
-            raise ValueError("AnnData preprocessing requires bam")
-        matrix, cells = from_anndata(
-            adata,
-            cells,
+            raise ValueError("expression preprocessing requires bam")
+        matrix = resolve_expression(
+            input,
+            adata=adata,
+            cells=cells,
             layer=layer,
             use_raw=use_raw,
             gene_id_key=gene_id_key,
             library_size_key=library_size_key,
         )
         bam = Path(bam)
-        arguments["adata"] = matrix.provenance()
-        arguments["cells"] = provenance(cells)
-        LOG.info("AnnData selection: %s", matrix.metadata)
-    else:
-        outs = Path(outs)
-        matrix = outs / "filtered_feature_bc_matrix.h5"
-        if not matrix.is_file():
-            matrix = outs / "filtered_feature_bc_matrix"
-        bam = outs / "possorted_genome_bam.bam"
-        if isinstance(cells, pd.DataFrame):
-            arguments["cells"] = provenance(cells)
+    cells = matrix.cell_table(require_barcodes=True)
+    arguments["input"] = matrix.provenance()
+    arguments["adata"] = None if adata is None else "<AnnData>"
+    arguments["cells"] = provenance(cells)
+    LOG.info("Expression selection: %s", matrix.metadata)
     if genome != "hg38":
         raise ValueError("preprocessing currently supports hg38 only")
     if reference is not None and reference_panel is not None:
@@ -289,7 +333,6 @@ def preprocess(
         raise ValueError("seed must be a nonnegative integer")
     cells = cells if isinstance(cells, pd.DataFrame) else Path(cells)
     out = Path(out)
-    reference = Path(reference) if reference is not None else None
     cellsnp_dir = Path(cellsnp_dir) if cellsnp_dir is not None else None
     phased_vcf = Path(phased_vcf) if phased_vcf is not None else None
     LOG.info("[preprocess 1/5] Validating inputs and resolving tools/resources")
@@ -298,26 +341,26 @@ def preprocess(
     if settings.get("genome", genome) != genome:
         raise ValueError("configured resource build differs from genome")
     resources = settings.get("resources", {})
-    resolved = {
-        key: Path(value or resources[key]).resolve()
-        if value or resources.get(key)
-        else None
-        for key, value in dict(
-            genes=genes,
-            snp_vcf=snp_vcf,
-            genetic_map=genetic_map,
-            phasing_panel=phasing_panel,
-            beagle_jar=beagle_jar,
-        ).items()
-    }
+    resolved = {}
+    for key, value in dict(
+        genes=genes,
+        snp_vcf=snp_vcf,
+        genetic_map=genetic_map,
+        phasing_panel=phasing_panel,
+        beagle_jar=beagle_jar,
+    ).items():
+        value = resources.get(key) if value is None else value
+        resolved[key] = (
+            value.copy()
+            if isinstance(value, pd.DataFrame)
+            else Path(value).resolve()
+            if value is not None
+            else None
+        )
     genes, snp_vcf, genetic_map, phasing_panel, beagle_jar = resolved.values()
     if reference is None and reference_panel is None:
         reference_panel = settings.get("default_reference_panel", "b-cells-v1")
         LOG.info("Using default B-cell expression panel: %s", reference_panel)
-    if reference_panel is not None:
-        from .resources import resolve_expression_panel
-
-        reference_panel = resolve_expression_panel(reference_panel, config_path)
     if chromosomes is None:
         chromosomes = settings.get("chromosomes", [*map(str, range(1, 23)), "X"])
     if isinstance(chromosomes, str):
@@ -334,7 +377,9 @@ def preprocess(
     if not phased_vcf:
         required += ["phasing_panel", "beagle_jar"]
     for key in required:
-        if resolved[key] is None or not resolved[key].exists():
+        if resolved[key] is None or (
+            not isinstance(resolved[key], pd.DataFrame) and not resolved[key].exists()
+        ):
             raise ValueError(f"provide {key} or run barcodecnv setup --genome hg38")
     arguments.update(
         resolved,
@@ -369,22 +414,18 @@ def preprocess(
     # Use the production loader for input validation, including cells in 10x and library sizes.
     if out.exists():
         raise FileExistsError(f"output directory already exists: {out}")
-    fitted_reference = (
-        fit_from_files(
-            matrix,
-            cells,
-            genes,
-            reference_panel,
-            genome=genome,
-            method=reference_method,
-            min_cpm=reference_min_cpm,
-            max_iter=reference_iterations,
-            bin_genes=reference_bin_genes,
-        )
-        if reference_panel is not None
-        else None
+    reference_profile, fitted_reference = resolve_reference(
+        matrix,
+        genes,
+        reference=reference,
+        reference_panel=reference_panel,
+        config=config_path,
+        genome=genome,
+        reference_method=reference_method,
+        reference_min_cpm=reference_min_cpm,
+        reference_iterations=reference_iterations,
+        reference_bin_genes=reference_bin_genes,
     )
-    reference_profile = fitted_reference.profile if fitted_reference else reference
     initial = load_cells(
         matrix,
         cells,
@@ -412,12 +453,29 @@ def preprocess(
     run = Commands(tools, out)
     status = dict(
         status="running",
+        workspace=dict(path=str(out), retained=True),
         genome=genome,
         chromosomes=chroms,
         arguments={
-            k: str(v) if isinstance(v, Path) else v for k, v in arguments.items()
+            k: provenance(v)
+            if isinstance(
+                v,
+                (
+                    ExpressionInput,
+                    FittedReference,
+                    ReferencePanel,
+                    pd.DataFrame,
+                ),
+            )
+            else str(v)
+            if isinstance(v, Path)
+            else v
+            for k, v in arguments.items()
         },
         tools={k: provenance(v, digest=True) for k, v in tools.items()},
+        tool_versions={
+            k: v for k, v in settings.get("tool_versions", {}).items() if k in tools
+        },
         inputs={
             k: provenance(v, digest=k in ("cells", "reference", "beagle_jar"))
             for k, v in dict(
@@ -426,8 +484,8 @@ def preprocess(
                 matrix=matrix,
                 **(
                     {"reference": reference}
-                    if reference
-                    else {"reference_panel": reference_panel}
+                    if reference is not None
+                    else {"reference_panel": fitted_reference.panel}
                 ),
                 **({"bam": bam} if not cellsnp_dir else {}),
                 **({"beagle_jar": beagle_jar} if not phased_vcf else {}),
@@ -585,7 +643,7 @@ def preprocess(
         raise
     finally:
         write_json(manifest, status)
-    return out / "prepared.h5"
+    return PreparedResult(data, fitted_reference, status, out)
 
 
 def main(argv=None):

@@ -8,6 +8,8 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.sparse import csr_matrix
 
+from .results import SignalResult, SignalScores
+
 
 @dataclass(frozen=True)
 class SignalFeatures:
@@ -92,7 +94,9 @@ def signal_features(bundle, bin_width_bp=10_000_000):
     )
 
 
-def barcode_signal_test(bundle, *, permutations=199, bin_width_bp=10_000_000, seed=42):
+def barcode_signal_test(
+    bundle, *, permutations=199, bin_width_bp=10_000_000, seed=42
+) -> SignalResult:
     if not isinstance(permutations, int) or permutations < 1:
         raise ValueError("permutations must be positive")
     features = signal_features(bundle, bin_width_bp)
@@ -109,10 +113,10 @@ def barcode_signal_test(bundle, *, permutations=199, bin_width_bp=10_000_000, se
         if assessable
         else None
     )
-    return dict(
+    return SignalResult(
         status="assessed" if assessable else "unassessable",
         pvalue=p,
-        scores=dict(zip(("joint", "depth", "allele"), observed.tolist())),
+        scores=SignalScores(*observed.tolist()),
         null_scores=null,
         excess_over_null_median=float(observed[0] - np.median(null[:, 0]))
         if assessable

@@ -115,8 +115,7 @@ saves the profile, weights and gene-selection audit. `fit-reference` exposes tha
 step on its own. See [REFERENCE_FITTING.md](docs/REFERENCE_FITTING.md) for panel format,
 settings, the optional regional method and limitations.
 
-The former inference-only `run` command is now named `infer`. If count tables
-and phased alleles are already available, `infer` can load them directly:
+If count tables and phased alleles are already available, `infer` can load them directly:
 
 ```sh
 uv run barcodecnv infer \
@@ -293,95 +292,218 @@ the formal permutation p-value.
 
 ## Python workflows
 
-Every CLI command delegates to a high-level function in `barcodecnv.api`. These
-functions accept named parameters and return Python results; they do not parse
-command-line arguments or configure logging.
+Start with `from barcodecnv import api`. Notebook completion on `api.` lists the
+supported workflow functions and types. Functions return Python objects; their
+attributes and methods are available through completion and `help()`.
+
+### Which operations contain which?
+
+`run_pipeline()` is the top-level **analysis** wrapper. Resource installation is
+an explicit, separate operation; analysis never implicitly downloads resources.
+
+```text
+setup() → Resources                 # once, or load_resources(config_path)
+from_anndata() / from_10x() → ExpressionInput
+
+run_pipeline(expression, bam=..., config=resources)
+├── preprocess() → PreparedResult
+│   └── fit_reference()             # if a panel is supplied; a fitted reference is reused
+└── infer() → InferenceResult
+    └── signal() → SignalResult     # included unless skip_signal=True
+
+prepare() → PreparedResult          # alternative to preprocess() for existing allele tables
+```
+
+`fit_reference()` and `signal()` can also be called separately to inspect those
+stages. Calling `signal()` separately does not disable the diagnostic inside
+`infer()`; normally inspect `result.signal` after inference instead.
+The Python entry point is `api.run_pipeline`; the CLI command is `barcodecnv run`.
+
+### Recommended notebook route
+
+Adapt AnnData once, then pass the returned objects between stages. The following
+assumes `adata`, a `barcode_table` with `cell` and `barcode` columns, and an indexed
+BAM with `CB`/`UB` tags. The provisioned default panel is for B-cell samples;
+choose a suitable normal panel for other samples.
 
 ```python
 from barcodecnv import api
 
-config = api.setup(genome="hg38")  # Download resources and provision tools once.
-prepared = api.preprocess(
-    outs="/path/to/cellranger/outs", cells="/path/to/cells.tsv",
-    config=config, out="results/preprocessing",
+resources = api.setup(genome="hg38")
+# On subsequent sessions, without downloading:
+# resources = api.load_resources("/path/to/config.json")
+
+expression = api.from_anndata(
+    adata,
+    cells=barcode_table,
+    layer="counts",                       # Unnormalized UMI counts.
+    gene_id_key="gene_ids",                # Omit if var_names already contain gene IDs.
+    library_size_key="total_counts",       # Whole-assay totals before gene filtering.
 )
-result = api.infer(prepared, out="results/inference", bootstraps=64, seed=42)
-probabilities = result["fit"].classes  # barcode × genomic marker × CN class
+
+# Resource paths are directly usable. For inspection, resources.load_genes()
+# and resources.load_reference_panel() return a DataFrame and ReferencePanel.
+reference = api.fit_reference(
+    expression,
+    genes=resources.genes,
+    reference_panel=resources.reference_panel,
+)
+print(reference.weights)
+
+prepared = api.preprocess(
+    expression, bam="/path/to/sample.bam",
+    reference=reference, config=resources,
+)
+result = api.infer(prepared, bootstraps=64, seed=42)
+
+result.groups_table()                    # Labelled barcode membership and stability.
+result.group_cn_table()                  # Gene-level pooled CN, consensus and conflicts.
+result.plot_summary()                    # Open Matplotlib Figure.
 ```
 
-For the complete workflow in one call, use
-`api.run(outs=..., cells=..., config=config, out=...)`. The default expression
-panel is intended for B-cell samples. Supply `reference_panel` or `reference`
-when a different normal baseline is appropriate.
+The combined analysis call, allowing preprocessing to fit the configured panel,
+is `api.run_pipeline(expression, bam="/path/to/sample.bam", config=resources)`.
+For 10x input, construct `expression` using
+`api.from_10x(matrix_path, cells=barcode_table)`.
 
-| CLI command | Python function | Return value |
-| --- | --- | --- |
-| `setup` | `api.setup(...)` | Resource config `Path` |
-| `fit-reference` | `api.fit_reference(...)` | `FittedReference` with profile, weights and audit |
-| `preprocess` | `api.preprocess(...)` | Prepared bundle `Path` |
-| `prepare` | `api.prepare(...)` | `CellBundle`, also saved to `out` |
-| `signal` | `api.signal(...)` | Diagnostic dictionary |
-| `infer` | `api.infer(...)` | Analysis dictionary, including `signal` and `output_directory` |
-| `run` | `api.run(...)` | Same result as `infer` |
-
-Parameter names follow CLI options with underscores, for example
-`reference_panel` and `phase_iterations`. Use `cn_refinement=False` and
-`hf_refinement=False` for the CLI's `--no-…` switches. Paths accept strings or
-`pathlib.Path`; `infer` and `signal` also accept a `CellBundle` as their first
-argument, or the named count inputs accepted by the CLI. In-memory inputs are
-saved as `out/prepared.h5` for reproducibility.
-
-`fit_reference` can return a fit without writing files; pass `out` to save its
-profile and audit. The analysis functions write the same reports as the CLI and
-require a new output directory. `setup` reuses its resource cache. Functions
-raise exceptions on failure; preprocessing and analysis record failures after
-output creation. Use `help(api.infer)` or the other functions to inspect their
-signatures. The lower-level numerical interfaces below remain available.
-
-### Scanpy / AnnData inputs
-
-`api.preprocess` and `api.run` also accept an AnnData object, an indexed BAM and a
-barcode table. The table may be a pandas DataFrame or a CSV/TSV path, with `cell`
-and `barcode` columns. For example, after selecting cells in Scanpy:
+If phased allele counts are already available, use the alternative preparation
+route. It returns the same type and retains any fitted reference:
 
 ```python
-prepared = api.preprocess(
-    adata=filtered_adata,
-    bam="/path/to/sample.bam",
-    cells=barcode_table,
-    layer="counts",                     # Unnormalized UMI counts.
-    gene_id_key="gene_ids",              # Ensembl IDs in .var; omit to use var_names.
-    library_size_key="total_counts",     # Whole-assay totals saved before gene filtering.
-    config=config,
-    out="results/preprocessing",
+prepared = api.prepare(
+    expression, genes=resources.genes, reference=reference,
+    alleles=allele_table,                  # DataFrame or count-table path.
 )
-result = api.infer(prepared, out="results/inference")
+# Alleles must supply genetic_cm; otherwise also pass genetic_map=resources.genetic_map.
+result = api.infer(prepared)
 ```
 
-Pass the same inputs to `api.run(..., out="results")` for preprocessing and
-inference together. Supply either `outs` or `adata` plus `bam`. The CLI continues
-to use Cell Ranger `outs` directories.
+`reference` accepts a `FittedReference`, a gene-to-fraction mapping or a profile
+file. `reference_panel` requests a new fit and is mutually exclusive with
+`reference`. Gene annotations accept DataFrames with `gene`, `chromosome` and
+`position` (or `start`/`end`) columns, or GTF/CSV/TSV paths.
 
-Cells are selected by the intersection of `adata.obs_names` and the barcode
-table, in AnnData order. Cells removed from AnnData stay excluded even if they
-remain in the original table; observations without a lineage annotation are
-also excluded. Selection counts and a fingerprint of the selected input are
-recorded in `preprocessing.json`. Cell names must exactly match BAM `CB` tags,
-including suffixes. This remains a single-donor workflow with `CB`/`UB` tagged
-alignments. The supplied AnnData object and table are not modified.
+File and AnnData convenience arguments remain available: `fit_reference` and
+`prepare` accept `adata=...` or `matrix=...`; `preprocess` and `run_pipeline` accept
+`adata=...` plus `bam`, or Cell Ranger `outs`. These adapt to the same object
+workflow. The object route above avoids repeating count-selection arguments.
 
-By default, counts come from `.X`. Select a layer with `layer="counts"`, or use
-`use_raw=True` for `.raw.X` and its own gene IDs; these options are mutually
-exclusive. `.raw` must have been saved before normalization to be usable here.
-Dense NumPy and SciPy sparse counts are supported. Nonfinite, negative and
-fractional values are rejected, but an integer-valued matrix is not proof that
-it contains original UMI counts.
+### Results and output directories
+
+Every analysis stage's `out` is an optional **new directory**. Omit it to retain
+results in memory; use the result's `.save(out)` method to export later.
+
+| Operation | Return type | Main attributes and methods |
+| --- | --- | --- |
+| `from_anndata`, `from_10x` | `ExpressionInput` | `counts`, `genes`, `cells`, `libraries`, `cell_table()` |
+| `setup`, `load_resources` | `Resources` | `genes`, `reference_panel`, `config_path`, `load_genes()`, `load_reference_panel()` |
+| `fit_reference` | `FittedReference` | `profile`, `weights`, `audit`, `save()` |
+| `prepare`, `preprocess` | `PreparedResult` | `bundle`, `reference_fit`, `provenance`, `save()` |
+| `signal` | `SignalResult` | `pvalue`, `scores.joint`, `null_table()`, `plot()`, `save()` |
+| `infer`, `run_pipeline` | `InferenceResult` | `prepared`, `reference_fit`, `signal`, tables, plots, `save()` |
+
+```python
+reference.save("results/reference")
+prepared.save("results/prepared")
+result.save("results/inference")
+```
+
+Passing `out` to an individual stage exports immediately. `preprocess(out=...)`
+also retains native-tool working files and logs; without `out`, those files are
+temporary and cleaned up on success or failure. A later `prepared.save()` exports
+counts and provenance, without recreating native intermediates or logs.
+`run_pipeline(out=...)` creates `preprocessing/`, `inference/` and `pipeline.json`
+beneath that directory. Its result's `.save()` exports the inference report,
+including prepared counts and retained audits, rather than recreating that
+working directory layout.
+
+Use different stage subdirectories under a common parent: existing output paths
+are refused. Resource setup is the exception: it provisions a reusable disk cache.
+The CLI requires output directories too. For example, `prepare --out prepared`
+writes `prepared/prepared.h5`, `prepared/preprocessing.json` and, when fitted,
+`prepared/reference_fit/`.
+
+Both preparation routes preserve the fit in `prepared.reference_fit`, or `None`
+when a supplied profile has no mixture-fit audit. Inference retains that object
+at `result.prepared` and the fit at `result.reference_fit`. Pass the whole prepared
+result to inference: passing only `.bundle`, or reloading the bare `prepared.h5`,
+discards preparation context. No sidecar files are silently reloaded.
+
+For BAM preprocessing, paths inside `.provenance` describe the original execution;
+`provenance["workspace"]["retained"]` records whether its native files were kept.
+The historical paths remain valid provenance after temporary files are removed.
+Functions raise exceptions and leave logging configuration to the caller.
+
+### Inspecting biological results
+
+Tables are built from stored results and require no files or refitting. Optional
+barcode/group selectors use their actual IDs, not array positions; unknown IDs
+raise an error. Large tables can be restricted to a single barcode or group.
+
+```python
+membership = result.groups_table()
+barcode = membership.barcode.iloc[0]
+barcode_cn = result.barcode_cn_table(barcode=barcode)
+group_cn = result.group_cn_table()         # Or group=<a resolved group ID>.
+segments = result.group_segments_table()   # Runs of marginal pooled MAP calls.
+
+# Raw arrays remain available, with explicit matching labels:
+probabilities = result.probabilities       # barcode × marker × CN class.
+barcode_ids = membership.barcode
+markers = result.marker_table()
+class_names = result.class_names
+
+# Diagnostic returned by infer(), unless skip_signal=True:
+result.signal.pvalue
+result.signal.scores.joint
+result.signal.null_table()
+result.signal.plot()
+```
+
+Group CN tables distinguish cell-weighted barcode consensus from the separately
+fitted pooled group model. Segment probability summaries describe their markers;
+they are not probabilities that the entire segment has one state. Unresolved
+barcodes remain in the barcode tables; group tables include resolved groups only.
+If no groups resolve, group tables are empty with their columns preserved.
+
+`result.plot_summary()`, `.plot_groups()` and `.plot_signal()` return open
+Matplotlib Figures. `plot_signal()` raises if the diagnostic was skipped.
+Figures use the caller's backend and can be customized or saved with
+`fig.savefig(...)`; exporting a report leaves existing figures open. Each plot
+call makes a fresh figure without rerunning inference or permutations.
+
+The same table builders drive Python inspection and disk exports. `.save()`
+writes tables, HDF5 results, PNG plots, the prepared counts and retained audits,
+using only the stored result. Original input files need not remain available.
+`result.fit` and other model internals remain available for advanced analysis;
+the labelled methods above are the recommended starting point.
+
+### AnnData count and selection contract
+
+AnnData adapters select the intersection of `obs_names` and the cell table, in
+AnnData order. Removed cells stay excluded even if they remain in the table;
+unmapped observations are excluded too. 10x adapters instead require every
+requested cell to be present, preserving CLI input validation. Either adapter
+can omit the table for reference fitting alone; lineage labels are required for
+preparation and inference. Selection information is retained in the input's
+metadata and in preprocessing records.
+
+Cell IDs must match BAM `CB` tags exactly, including suffixes. The workflow
+remains single-donor. Input arrays and labels are copied, and the expression
+object's count/library arrays are read-only. The original AnnData and tables
+are not modified.
+
+By default, counts come from `.X`. Select `layer="counts"` or `use_raw=True`
+for `.raw.X` and its own gene axis. `.raw` must have been saved before
+normalization to be suitable. Dense NumPy and SciPy sparse counts are supported.
+Nonfinite, negative and fractional values are rejected; integer-valued data
+alone cannot establish that these are original UMI counts.
 
 If the chosen source contains all assayed genes, library sizes are calculated
-from it. **After gene filtering, provide `library_size_key` naming an `.obs`
-column of original whole-assay UMI totals**, or use a full-gene raw-count source
-in `.raw`. Missing genes cannot be detected automatically. Summing only retained
-genes would change the reference exposure and bias CN inference. Selecting
+from it. **After gene filtering, supply `library_size_key` naming an `.obs`
+column of original whole-assay UMI totals**, or select a full-gene raw-count
+source in `.raw`. Missing genes cannot be detected automatically. Summing only
+retained genes changes the reference exposure and biases CN inference. Selecting
 highly variable genes alone also removes useful genomic coverage. Gene IDs must
 match the annotation and reference panel; duplicate IDs are rejected.
 

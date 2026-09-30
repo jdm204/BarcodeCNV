@@ -25,20 +25,45 @@ def _write_frames(path, frames, empty_columns):
             pd.DataFrame(columns=empty_columns).to_csv(handle, index=False)
 
 
-def write_cn_tables(out, bundle, probabilities, labels, calls):
-    markers = bundle.gene_markers
-    grid = bundle.grid
-    genes = dict(
-        gene=bundle.gene_ids,
-        chromosome=np.asarray(grid.chrom)[markers],
-        start=grid.start[markers],
-        end=grid.end[markers],
+def collect_frames(frames, columns):
+    """Materialize fresh tables for Python; disk exports stream the same frames."""
+    frames = list(frames)
+    return (
+        pd.concat(frames, ignore_index=True)
+        if frames
+        else pd.DataFrame(columns=columns)
     )
+
+
+def _indices(values, selected, name):
+    if selected is None:
+        return range(len(values))
+    matches = np.flatnonzero(np.asarray(values) == selected)
+    if not len(matches):
+        raise ValueError(f"unknown {name}: {selected!r}")
+    return matches
+
+
+def _genes(bundle):
+    markers = bundle.gene_markers
+    return dict(
+        gene=bundle.gene_ids,
+        chromosome=np.asarray(bundle.grid.chrom)[markers],
+        start=bundle.grid.start[markers],
+        end=bundle.grid.end[markers],
+    )
+
+
+def barcode_cn_frames(bundle, probabilities, labels, *, barcode=None):
+    markers = bundle.gene_markers
+    genes = _genes(bundle)
     base = list(genes)
     state_columns = list(_probability_columns(np.zeros((0, 4))))
+    indices = _indices(bundle.barcodes, barcode, "barcode")
 
     def barcode_frames():
-        for i, barcode in enumerate(bundle.barcodes):
+        for i in indices:
+            barcode = bundle.barcodes[i]
             yield pd.DataFrame(
                 dict(
                     barcode=barcode,
@@ -48,11 +73,15 @@ def write_cn_tables(out, bundle, probabilities, labels, calls):
                 )
             )
 
-    _write_frames(
-        out / "barcode_cn_genes.csv.gz",
-        barcode_frames(),
-        ["barcode", "group"] + base + state_columns,
-    )
+    return barcode_frames(), ["barcode", "group"] + base + state_columns
+
+
+def group_cn_frames(bundle, calls, *, group=None):
+    markers = bundle.gene_markers
+    genes = _genes(bundle)
+    base = list(genes)
+    state_columns = list(_probability_columns(np.zeros((0, 4))))
+    indices = _indices(calls.groups, group, "group")
     metrics = (
         "uncertain_cell_fraction",
         "consensus_conflict_cell_fraction",
@@ -64,7 +93,8 @@ def write_cn_tables(out, bundle, probabilities, labels, calls):
     group_columns += list(metrics)
 
     def group_frames():
-        for i, group in enumerate(calls.groups):
+        for i in indices:
+            group = calls.groups[i]
             yield pd.DataFrame(
                 dict(
                     group=group,
@@ -77,7 +107,12 @@ def write_cn_tables(out, bundle, probabilities, labels, calls):
                 )
             )
 
-    _write_frames(out / "group_cn_genes.csv.gz", group_frames(), group_columns)
+    return group_frames(), group_columns
+
+
+def group_segment_frames(bundle, calls, *, group=None):
+    grid = bundle.grid
+    indices = _indices(calls.groups, group, "group")
     segment_columns = [
         "group",
         "chromosome",
@@ -93,7 +128,8 @@ def write_cn_tables(out, bundle, probabilities, labels, calls):
 
     def segment_frames():
         chrom = np.asarray(grid.chrom)
-        for i, group in enumerate(calls.groups):
+        for i in indices:
+            group = calls.groups[i]
             states = calls.pooled[i].argmax(-1)
             breaks = np.r_[
                 0,
@@ -124,4 +160,14 @@ def write_cn_tables(out, bundle, probabilities, labels, calls):
                 )
             yield pd.DataFrame(rows, columns=segment_columns)
 
-    _write_frames(out / "group_cn_segments.csv.gz", segment_frames(), segment_columns)
+    return segment_frames(), segment_columns
+
+
+def write_cn_tables(out, bundle, probabilities, labels, calls):
+    """Stream the same labelled tables exposed by InferenceResult to disk."""
+    for name, (frames, columns) in (
+        ("barcode_cn_genes", barcode_cn_frames(bundle, probabilities, labels)),
+        ("group_cn_genes", group_cn_frames(bundle, calls)),
+        ("group_cn_segments", group_segment_frames(bundle, calls)),
+    ):
+        _write_frames(out / f"{name}.csv.gz", frames, columns)

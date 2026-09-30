@@ -11,8 +11,9 @@ from test_cli import raw_inputs as raw_inputs
 from test_reference import write_panel
 
 from barcodecnv import api
-from barcodecnv.bundle import CellBundle, read_bundle
+from barcodecnv.bundle import read_bundle
 from barcodecnv.cli import main
+from barcodecnv.results import PreparedResult
 
 
 def count_inputs(root):
@@ -25,10 +26,13 @@ def count_inputs(root):
 
 
 def test_prepare_signal_infer_match_cli(tmp_path, raw_inputs):
-    prepared = tmp_path / "prepared.h5"
-    bundle = api.prepare(**count_inputs(tmp_path), out=prepared)
-    assert isinstance(bundle, CellBundle)
-    np.testing.assert_array_equal(read_bundle(prepared).libraries, bundle.libraries)
+    directory = tmp_path / "prepared"
+    prepared = directory / "prepared.h5"
+    bundle = api.prepare(**count_inputs(tmp_path), out=directory)
+    assert isinstance(bundle, PreparedResult)
+    np.testing.assert_array_equal(
+        read_bundle(prepared).libraries, bundle.bundle.libraries
+    )
     diagnostic = api.signal(bundle, out=tmp_path / "signal", permutations=19)
     result = api.infer(
         bundle,
@@ -62,12 +66,12 @@ def test_prepare_signal_infer_match_cli(tmp_path, raw_inputs):
         == 0
     )
     with h5py.File(tmp_path / "cli/result.h5") as saved:
-        np.testing.assert_array_equal(saved["probabilities"][:], result["fit"].classes)
+        np.testing.assert_array_equal(saved["probabilities"][:], result.fit.classes)
         np.testing.assert_array_equal(
-            saved["group_calls/pooled"][:], result["group_calls"].pooled
+            saved["group_calls/pooled"][:], result.group_calls.pooled
         )
-    assert result["output_directory"] == tmp_path / "python"
-    assert diagnostic["pvalue"] == result["signal"]["pvalue"]
+    assert result.output_directory == tmp_path / "python"
+    assert diagnostic.pvalue == result.signal.pvalue
     assert json.loads((tmp_path / "python/signal.json").read_text()) == json.loads(
         (tmp_path / "cli/signal.json").read_text()
     )
@@ -78,7 +82,7 @@ def test_prepare_signal_infer_match_cli(tmp_path, raw_inputs):
         == hashlib.sha256((tmp_path / "python/prepared.h5").read_bytes()).hexdigest()
     )
     with pytest.raises(FileExistsError):
-        api.prepare(**count_inputs(tmp_path), out=prepared)
+        api.prepare(**count_inputs(tmp_path), out=directory)
 
 
 def test_run_matches_python_stages_without_parser(
@@ -101,11 +105,11 @@ def test_run_matches_python_stages_without_parser(
         phased_vcf=tmp_path / "phased.vcf.gz",
     )
     settings = dict(bootstraps=20, draws=32, skip_signal=True)
-    combined = api.run(**inputs, out=tmp_path / "combined", **settings)
+    combined = api.run_pipeline(**inputs, out=tmp_path / "combined", **settings)
     prepared = api.preprocess(**inputs, out=tmp_path / "preprocessed")
     staged = api.infer(prepared, out=tmp_path / "staged", **settings)
-    np.testing.assert_array_equal(combined["fit"].classes, staged["fit"].classes)
-    np.testing.assert_array_equal(combined["groups"], staged["groups"])
+    np.testing.assert_array_equal(combined.fit.classes, staged.fit.classes)
+    np.testing.assert_array_equal(combined.groups, staged.groups)
     assert (
         json.loads((tmp_path / "combined/pipeline.json").read_text())["status"]
         == "complete"
@@ -164,10 +168,12 @@ def test_api_failure_raises_and_preserves_snapshot(tmp_path, raw_inputs, monkeyp
 
 
 def test_setup_plan_without_writes(tmp_path, capsys):
-    config = api.setup(resource_dir=str(tmp_path), chromosomes=("chr22",), dry_run=True)
+    from barcodecnv.resources import setup
+
+    config = setup(resource_dir=str(tmp_path), chromosomes=("chr22",), dry_run=True)
     plan = json.loads(capsys.readouterr().out)
     assert list(plan["panels"]) == ["22"]
     assert config == tmp_path / "hg38/config.json"
     assert not config.parent.exists()
     with pytest.raises(ValueError, match="unique"):
-        api.setup(resource_dir=tmp_path, chromosomes=("1", "chr1"), dry_run=True)
+        setup(resource_dir=tmp_path, chromosomes=("1", "chr1"), dry_run=True)

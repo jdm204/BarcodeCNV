@@ -11,9 +11,9 @@ import pandas as pd
 from scipy.io import mmread
 from scipy.sparse import csc_matrix
 
-from .anndata_input import ExpressionInput
 from .bundle import CellBundle
 from .data import Grid, Loci
+from .expression import ExpressionInput
 
 
 def table(path):
@@ -119,8 +119,9 @@ def read_expression(source):
 
 
 def read_gene_coordinates(path):
-    path = Path(path)
-    if path.name.endswith((".gtf", ".gtf.gz")):
+    if not isinstance(path, pd.DataFrame):
+        path = Path(path)
+    if isinstance(path, Path) and path.name.endswith((".gtf", ".gtf.gz")):
         import re
 
         rows = []
