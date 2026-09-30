@@ -202,3 +202,37 @@ def test_cli_preprocess_config_discovery_and_precedence(tmp_path, monkeypatch):
     monkeypatch.setenv("BARCODECNV_PREPROCESS_CONFIG", str(override))
     assert discover_config() == override
     assert discover_config(config) == config
+
+
+@pytest.mark.parametrize("exit_status", [0, 7])
+def test_native_commands_and_output_stay_in_logs(tmp_path, capfd, caplog, exit_status):
+    import logging
+    import shlex
+    import sys
+
+    from barcodecnv.preprocessing import Commands
+
+    run = Commands({"helper": sys.executable}, tmp_path)
+    script = "import sys; print('native stdout'); print('native stderr', file=sys.stderr); sys.exit(int(sys.argv[1]))"
+    with caplog.at_level(logging.INFO):
+        if exit_status:
+            with pytest.raises(
+                RuntimeError, match="helper failed .*exit status 7.*see"
+            ) as error:
+                run("helper", "-c", script, exit_status)
+            assert str(tmp_path / "00-helper.log") in str(error.value)
+            assert "native stderr" not in str(error.value)
+        else:
+            run("helper", "-c", script, exit_status)
+    console = capfd.readouterr()
+    assert not console.out and not console.err
+    assert script not in caplog.text
+    log = (tmp_path / "00-helper.log").read_text()
+    assert log.startswith("$ " + shlex.join(run.history[0]["argv"]) + "\n")
+    assert "native stdout\n" in log and "native stderr\n" in log
+    if exit_status:
+        assert "Exit status: 7" in log
+    # Even a mistakenly reused command runner cannot truncate an earlier log.
+    with pytest.raises(FileExistsError):
+        Commands({"helper": sys.executable}, tmp_path)("helper", "-c", script, 0)
+    assert (tmp_path / "00-helper.log").read_text() == log

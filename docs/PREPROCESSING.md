@@ -87,7 +87,13 @@ measured phasing confidence. GQ is not treated as phase quality. These assumptio
 are recorded in `preprocessing.json`; phase is subsequently inferred in the CN HMM.
 
 Outputs include `cells.tsv`, `alleles.tsv.gz`, intermediate VCFs/count matrices,
-per-command logs, `prepared.h5`, `infer.sh` and `preprocessing.json`. The manifest
+per-command logs, `prepared.h5`, `infer.sh` and `preprocessing.json`. Each numbered
+tool log contains the invoked command and its stdout/stderr; failures also record
+the exit status. Console output reports stages and concise failure messages with
+the log path, rather than native command lines or tool diagnostics. Logs are
+named `00-bcftools.log`, `01-cellsnp-lite.log`, etc., in invocation order under
+the preprocessing directory (`OUT/preprocessing/` for `run --out OUT`). Existing
+log files are never overwritten. The manifest
 records commands, parameters, source paths, sizes/timestamps, selected checksums,
 counts and complete/failed status. Existing output directories are never overwritten;
 a failure retains logs and does not publish a completed bundle. No automatic

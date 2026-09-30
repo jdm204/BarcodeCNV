@@ -120,14 +120,21 @@ class Commands:
         argv = [self.tools[name], *map(str, args)]
         log = self.out / f"{len(self.history):02d}-{name}.log"
         self.history.append(dict(argv=argv, log=str(log)))
-        LOG.info("%s", shlex.join(argv))
-        with log.open("wb") as handle:
+        with log.open("x", encoding="utf-8") as handle:
+            handle.write("$ " + shlex.join(argv) + "\n\n")
+            handle.flush()
             try:
                 subprocess.run(
                     argv, stdout=handle, stderr=subprocess.STDOUT, check=True
                 )
             except subprocess.CalledProcessError as exc:
-                raise RuntimeError(f"{name} failed; see {log}") from exc
+                handle.write(f"\nExit status: {exc.returncode}\n")
+                raise RuntimeError(
+                    f"{name} failed (exit status {exc.returncode}); see {log}"
+                ) from exc
+            except OSError as exc:
+                handle.write(f"Could not start command: {exc}\n")
+                raise RuntimeError(f"Could not start {name}; see {log}") from exc
 
 
 def add_arguments(root):
@@ -322,7 +329,7 @@ def preprocess(
     arguments["input"] = matrix.provenance()
     arguments["adata"] = None if adata is None else "<AnnData>"
     arguments["cells"] = provenance(cells)
-    LOG.info("Expression selection: %s", matrix.metadata)
+    LOG.info("Selected %s cells and %s genes", len(matrix.cells), len(matrix.genes))
     if genome != "hg38":
         raise ValueError("preprocessing currently supports hg38 only")
     if reference is not None and reference_panel is not None:
@@ -370,7 +377,7 @@ def preprocess(
     if not chroms or len(set(chroms)) != len(chroms) or not set(chroms) <= supported:
         raise ValueError("chromosomes must be unique and drawn from 1..22,X")
     chroms.sort(key=chromosome_key)
-    LOG.info("Allele chromosomes: %s", ",".join(chroms))
+    LOG.info("Processing allele counts on %s chromosomes", len(chroms))
     required = ["genes", "genetic_map"]
     if not cellsnp_dir:
         required.append("snp_vcf")
@@ -637,7 +644,11 @@ def preprocess(
             + ' "$@"\n'
         )
         (out / "infer.sh").chmod(0o755)
-        LOG.info("Prepared %s. Next: %s", out / "prepared.h5", shlex.join(command))
+        LOG.info(
+            "Prepared counts for %s cells and %s lineage barcodes",
+            status["cells"],
+            status["lineage_barcodes"],
+        )
     except Exception as exc:
         status.update(status="failed", error=str(exc))
         raise
