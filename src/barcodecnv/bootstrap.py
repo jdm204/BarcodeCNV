@@ -92,7 +92,21 @@ def bootstrap_features(
     features = feature_function(requests(), genes, barcodes, work_parent=work_parent)
 
     def reduce(x):
-        return np.array([np.nanmean(x[ix], axis=0) * np.sqrt(len(ix)) for ix in blocks])
+        reduced = []
+        for ix in blocks:
+            block = x[ix]
+            counts = np.count_nonzero(~np.isnan(block), axis=0)
+            # Unexpressed genes remain NaN after smoothing. An entire block can
+            # be absent in a bootstrap draw; keep it NaN for the validity filter
+            # below rather than emitting nanmean's empty-slice warning.
+            means = np.divide(
+                np.nansum(block, axis=0),
+                counts,
+                out=np.full(block.shape[1], np.nan),
+                where=counts > 0,
+            )
+            reduced.append(means * np.sqrt(len(ix)))
+        return np.array(reduced)
 
     x = reduce(features["draw_-1"])
     boot = np.array([reduce(features[f"draw_{r}"]) for r in range(replicates)])
