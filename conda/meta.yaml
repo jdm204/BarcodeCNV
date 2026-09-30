@@ -33,6 +33,7 @@ test:
     - tests
   requires:
     - pytest >=8
+    - anndata >=0.10
   commands:
     - barcodecnv --help
     - barcodecnv setup --tools path --dry-run

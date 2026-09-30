@@ -18,7 +18,7 @@ import pandas as pd
 from scipy.optimize import minimize
 from scipy.special import softmax
 
-from .loading import canonical_genes, read_10x, read_gene_coordinates, table
+from .loading import canonical_genes, read_expression, read_gene_coordinates, table
 
 LOG = logging.getLogger(__name__)
 
@@ -391,7 +391,7 @@ def fit_reference(
 
 
 def fit_from_files(matrix, cells, genes, panel_path, **options):
-    counts, ids, cell_ids = read_10x(matrix)
+    counts, ids, cell_ids = read_expression(matrix)
     labels = table(cells).rename(columns={"cell_barcode": "cell"})
     if "cell" not in labels or labels.empty or labels.cell.duplicated().any():
         raise ValueError("reference fitting requires nonempty, unique selected cells")
@@ -402,16 +402,29 @@ def fit_from_files(matrix, cells, genes, panel_path, **options):
     fitted = fit_reference(
         read_panel(panel_path), ids, pooled, read_gene_coordinates(genes), **options
     )
+    from .anndata_input import ExpressionInput
+
     inputs = dict(
-        matrix=str(Path(matrix).resolve()),
-        cells=str(Path(cells).resolve()),
+        matrix=matrix.provenance()
+        if isinstance(matrix, ExpressionInput)
+        else str(Path(matrix).resolve()),
+        cells="<DataFrame>"
+        if isinstance(cells, pd.DataFrame)
+        else str(Path(cells).resolve()),
         genes=str(Path(genes).resolve()),
         selected_cells=len(selected),
         pooled_counts_sha256=hashlib.sha256(pooled.astype("<f8").tobytes()).hexdigest(),
     )
     for name, path in (("cells", cells), ("genes", genes)):
-        with Path(path).open("rb") as handle:
-            inputs[name + "_sha256"] = hashlib.file_digest(handle, "sha256").hexdigest()
+        if isinstance(path, pd.DataFrame):
+            inputs[name + "_sha256"] = hashlib.sha256(
+                path.to_csv(index=False).encode()
+            ).hexdigest()
+        else:
+            with Path(path).open("rb") as handle:
+                inputs[name + "_sha256"] = hashlib.file_digest(
+                    handle, "sha256"
+                ).hexdigest()
     return replace(fitted, audit={**fitted.audit, "assay_inputs": inputs})
 
 

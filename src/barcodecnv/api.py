@@ -13,6 +13,8 @@ from importlib.metadata import version
 from pathlib import Path
 from time import perf_counter
 
+import pandas as pd
+
 from .bundle import CellBundle, read_bundle, write_bundle
 from .depth_controls import DepthOptions
 from .fitting import FitOptions
@@ -35,6 +37,10 @@ def _arguments(values):
     return {
         k: str(v)
         if isinstance(v, Path)
+        else "<AnnData>"
+        if k == "adata" and v is not None
+        else "<DataFrame>"
+        if isinstance(v, pd.DataFrame)
         else "<CellBundle>"
         if isinstance(v, CellBundle)
         else v
@@ -440,7 +446,13 @@ def _analyse(
 
 def run(
     *,
-    outs,
+    outs=None,
+    adata=None,
+    bam=None,
+    layer=None,
+    use_raw=False,
+    gene_id_key=None,
+    library_size_key=None,
     cells,
     out,
     reference=None,
@@ -476,6 +488,9 @@ def run(
 ):
     """Run preprocessing then inference; return the same result as infer.
 
+    Supply outs or adata plus bam. AnnData count selection, cell intersection,
+    gene IDs and whole-assay library sizes follow preprocess (see its docstring).
+
     Writes preprocessing/, inference/ and pipeline.json under a new out directory.
     Failed inference retains prepared.h5. Errors are recorded and re-raised.
     """
@@ -508,6 +523,12 @@ def run(
         LOG.info("[run 1/2] Preprocessing Cell Ranger data")
         prepared = preprocess(
             outs=outs,
+            adata=adata,
+            bam=bam,
+            layer=layer,
+            use_raw=use_raw,
+            gene_id_key=gene_id_key,
+            library_size_key=library_size_key,
             cells=cells,
             out=out / "preprocessing",
             reference=reference,

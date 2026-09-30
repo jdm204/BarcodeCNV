@@ -338,6 +338,53 @@ raise exceptions on failure; preprocessing and analysis record failures after
 output creation. Use `help(api.infer)` or the other functions to inspect their
 signatures. The lower-level numerical interfaces below remain available.
 
+### Scanpy / AnnData inputs
+
+`api.preprocess` and `api.run` also accept an AnnData object, an indexed BAM and a
+barcode table. The table may be a pandas DataFrame or a CSV/TSV path, with `cell`
+and `barcode` columns. For example, after selecting cells in Scanpy:
+
+```python
+prepared = api.preprocess(
+    adata=filtered_adata,
+    bam="/path/to/sample.bam",
+    cells=barcode_table,
+    layer="counts",                     # Unnormalized UMI counts.
+    gene_id_key="gene_ids",              # Ensembl IDs in .var; omit to use var_names.
+    library_size_key="total_counts",     # Whole-assay totals saved before gene filtering.
+    config=config,
+    out="results/preprocessing",
+)
+result = api.infer(prepared, out="results/inference")
+```
+
+Pass the same inputs to `api.run(..., out="results")` for preprocessing and
+inference together. Supply either `outs` or `adata` plus `bam`. The CLI continues
+to use Cell Ranger `outs` directories.
+
+Cells are selected by the intersection of `adata.obs_names` and the barcode
+table, in AnnData order. Cells removed from AnnData stay excluded even if they
+remain in the original table; observations without a lineage annotation are
+also excluded. Selection counts and a fingerprint of the selected input are
+recorded in `preprocessing.json`. Cell names must exactly match BAM `CB` tags,
+including suffixes. This remains a single-donor workflow with `CB`/`UB` tagged
+alignments. The supplied AnnData object and table are not modified.
+
+By default, counts come from `.X`. Select a layer with `layer="counts"`, or use
+`use_raw=True` for `.raw.X` and its own gene IDs; these options are mutually
+exclusive. `.raw` must have been saved before normalization to be usable here.
+Dense NumPy and SciPy sparse counts are supported. Nonfinite, negative and
+fractional values are rejected, but an integer-valued matrix is not proof that
+it contains original UMI counts.
+
+If the chosen source contains all assayed genes, library sizes are calculated
+from it. **After gene filtering, provide `library_size_key` naming an `.obs`
+column of original whole-assay UMI totals**, or use a full-gene raw-count source
+in `.raw`. Missing genes cannot be detected automatically. Summing only retained
+genes would change the reference exposure and bias CN inference. Selecting
+highly variable genes alone also removes useful genomic coverage. Gene IDs must
+match the annotation and reference panel; duplicate IDs are rejected.
+
 ## Design and ownership
 
 * `data.py`: validated, owned, read-only arrays of already prepared counts and

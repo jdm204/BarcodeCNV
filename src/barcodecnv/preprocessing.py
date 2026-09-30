@@ -15,6 +15,9 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pandas as pd
+
+from .anndata_input import ExpressionInput, from_anndata
 from .bundle import write_bundle
 from .loading import chromosome, chromosome_key, load_cells, table
 from .preprocessing_io import export_alleles, phased_sites, pooled_vcf, vcf_records
@@ -57,6 +60,14 @@ def resolve_resource(directory, chrom, kind):
 
 
 def provenance(path, *, digest=False):
+    if isinstance(path, ExpressionInput):
+        return path.provenance()
+    if isinstance(path, pd.DataFrame):
+        return dict(
+            kind="table",
+            rows=len(path),
+            sha256=hashlib.sha256(path.to_csv(index=False).encode()).hexdigest(),
+        )
     path = Path(path).resolve()
     stat = path.stat()
     result = dict(path=str(path), bytes=stat.st_size, mtime_ns=stat.st_mtime_ns)
@@ -190,7 +201,13 @@ def discover_config(explicit=None):
 
 def preprocess(
     *,
-    outs,
+    outs=None,
+    adata=None,
+    bam=None,
+    layer=None,
+    use_raw=False,
+    gene_id_key=None,
+    library_size_key=None,
     cells,
     out,
     reference=None,
@@ -214,13 +231,54 @@ def preprocess(
     reference_bin_genes=200,
     inference_out=None,
 ):
-    """Preprocess one donor's Cell Ranger outputs; return the prepared bundle Path.
+    """Preprocess one donor's counts and BAM; return the prepared bundle Path.
+
+    Supply either outs, or adata plus bam. For AnnData, cells is a table path or
+    DataFrame with cell/barcode columns; the intersection with obs_names is used.
+    layer selects raw counts from a layer; use_raw selects raw.X and raw.var.
+    Otherwise X is used. gene_id_key selects a var column instead of var_names.
+    After gene filtering, library_size_key must name an obs column of original
+    whole-assay totals, unless using a full-gene count source in raw. Otherwise
+    totals are computed from the selected source. Inputs are not modified.
 
     Paths accept strings or Path objects. Resources are discovered from config;
     explicit resource arguments take precedence. Reference and reference_panel
     are alternatives. Existing output directories are never overwritten.
     """
     arguments = dict(locals())
+    if (outs is None) == (adata is None):
+        raise ValueError("provide either outs or adata with bam, not both")
+    if outs is not None and (
+        bam is not None
+        or layer is not None
+        or use_raw
+        or gene_id_key is not None
+        or library_size_key is not None
+    ):
+        raise ValueError("bam and AnnData options require adata")
+    if adata is not None:
+        if bam is None:
+            raise ValueError("AnnData preprocessing requires bam")
+        matrix, cells = from_anndata(
+            adata,
+            cells,
+            layer=layer,
+            use_raw=use_raw,
+            gene_id_key=gene_id_key,
+            library_size_key=library_size_key,
+        )
+        bam = Path(bam)
+        arguments["adata"] = matrix.provenance()
+        arguments["cells"] = provenance(cells)
+        LOG.info("AnnData selection: %s", matrix.metadata)
+    else:
+        outs = Path(outs)
+        matrix = outs / "filtered_feature_bc_matrix.h5"
+        if not matrix.is_file():
+            matrix = outs / "filtered_feature_bc_matrix"
+        bam = outs / "possorted_genome_bam.bam"
+        if isinstance(cells, pd.DataFrame):
+            arguments["cells"] = provenance(cells)
     if genome != "hg38":
         raise ValueError("preprocessing currently supports hg38 only")
     if reference is not None and reference_panel is not None:
@@ -229,7 +287,8 @@ def preprocess(
         raise ValueError("threads and memory_gb must be positive integers")
     if not isinstance(seed, int) or seed < 0:
         raise ValueError("seed must be a nonnegative integer")
-    outs, cells, out = Path(outs), Path(cells), Path(out)
+    cells = cells if isinstance(cells, pd.DataFrame) else Path(cells)
+    out = Path(out)
     reference = Path(reference) if reference is not None else None
     cellsnp_dir = Path(cellsnp_dir) if cellsnp_dir is not None else None
     phased_vcf = Path(phased_vcf) if phased_vcf is not None else None
@@ -290,10 +349,6 @@ def preprocess(
         if phased_vcf
         else {c: resolve_resource(phasing_panel, c, "panel") for c in chroms}
     )
-    matrix = outs / "filtered_feature_bc_matrix.h5"
-    if not matrix.is_file():
-        matrix = outs / "filtered_feature_bc_matrix"
-    bam = outs / "possorted_genome_bam.bam"
     if not cellsnp_dir:
         if not bam.is_file() or not any(
             p.is_file()
@@ -304,7 +359,7 @@ def preprocess(
             )
         ):
             raise ValueError(
-                "Cell Ranger outs must contain an indexed possorted_genome_bam.bam"
+                "provide an indexed BAM (Cell Ranger outs must contain possorted_genome_bam.bam)"
             )
     if phased_vcf:
         phased_sites(phased_vcf)

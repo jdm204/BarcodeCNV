@@ -11,11 +11,14 @@ import pandas as pd
 from scipy.io import mmread
 from scipy.sparse import csc_matrix
 
+from .anndata_input import ExpressionInput
 from .bundle import CellBundle
 from .data import Grid, Loci
 
 
 def table(path):
+    if isinstance(path, pd.DataFrame):
+        return path.copy().astype("string")
     name = str(path).lower()
     sep = (
         "\t"
@@ -109,6 +112,12 @@ def read_10x(path):
     return counts, canonical_genes(genes), ids
 
 
+def read_expression(source):
+    if isinstance(source, ExpressionInput):
+        return source.counts, list(source.genes), list(source.cells)
+    return read_10x(source)
+
+
 def read_gene_coordinates(path):
     path = Path(path)
     if path.name.endswith((".gtf", ".gtf.gz")):
@@ -179,7 +188,7 @@ def load_cells(
     alleles=None,
     genetic_map=None,
 ):
-    counts, gene_ids, cell_ids = read_10x(matrix)
+    counts, gene_ids, cell_ids = read_expression(matrix)
     labels = table(cells).rename(
         columns={"cell_barcode": "cell", "lineage_barcode": "barcode"}
     )
@@ -191,7 +200,11 @@ def load_cells(
     if np.any(ix < 0):
         raise ValueError("annotated cells are missing from expression matrix")
     counts = counts[:, ix]
-    libraries = np.asarray(counts.sum(axis=0)).ravel()
+    libraries = (
+        matrix.libraries[ix]
+        if isinstance(matrix, ExpressionInput)
+        else np.asarray(counts.sum(axis=0)).ravel()
+    )
     gene_table = read_gene_coordinates(genes)
     fractions = {}
     if reference is not None:
