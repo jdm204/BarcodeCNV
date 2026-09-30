@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "barcodecnv"
-version = "0.1.0"
+version = "0.2.0"
 description = "Experimental Python port of barcode pseudobulk CN inference"
 readme = "README.md"
 license = "MIT"
