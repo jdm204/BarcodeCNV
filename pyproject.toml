@@ -18,6 +18,7 @@ barcodecnv = "barcodecnv.cli:main"
 [dependency-groups]
 dev = [
     "anndata>=0.10",
+    "pre-commit>=4.6.2",
     "pytest>=8",
     "ruff>=0.16.9",
 ]
