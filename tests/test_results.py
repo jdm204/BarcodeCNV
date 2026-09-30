@@ -42,7 +42,13 @@ def test_plots_and_export_reuse_results_and_leave_caller_figures_open(
         )
         assert list(tmp_path.iterdir()) == []
         # Inspect actual plotted summaries rather than merely testing figure creation.
-        summary_expression = figures[0].axes[0].images[0].get_array()
+        summary_expression = np.concatenate(
+            [
+                mesh.get_array().filled(np.nan)
+                for mesh in figures[0].axes[0].collections
+            ],
+            axis=1,
+        )
         np.testing.assert_array_equal(
             summary_expression, fitted.self_expression[:, fitted.order].T
         )

@@ -242,17 +242,27 @@ class InferenceResult:
             *group_segment_frames(self.bundle, self.group_calls, group=group)
         )
 
-    def plot_summary(self):
-        """Return the expression/HF/CN summary Figure for display or customization."""
+    def plot_summary(self, *, chromosome_sizes=None):
+        """Return a genomic-distance summary Figure; chromosome_sizes overrides bp lengths."""
         from .plotting import plot_run
 
-        return plot_run(self, signal=self.signal)
+        return plot_run(
+            self,
+            signal=self.signal,
+            chromosome_sizes=chromosome_sizes,
+            genome=self.metadata.get("arguments", {}).get("genome", "hg38"),
+        )
 
-    def plot_groups(self):
-        """Return the group consensus, pooled CN and disagreement Figure."""
+    def plot_groups(self, *, chromosome_sizes=None):
+        """Return group CN on a genomic-distance axis; chromosome_sizes supplies bp lengths."""
         from .plotting import plot_group_calls
 
-        return plot_group_calls(self.bundle, self.group_calls)
+        return plot_group_calls(
+            self.bundle,
+            self.group_calls,
+            chromosome_sizes=chromosome_sizes,
+            genome=self.metadata.get("arguments", {}).get("genome", "hg38"),
+        )
 
     def plot_signal(self):
         """Return the stored permutation diagnostic Figure; raise if it was skipped."""

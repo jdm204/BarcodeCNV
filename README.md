@@ -472,6 +472,16 @@ Figures use the caller's backend and can be customized or saved with
 `fig.savefig(...)`; exporting a report leaves existing figures open. Each plot
 call makes a fresh figure without rerunning inference or permutations.
 
+Genome heatmaps concatenate the displayed chromosomes at their full GRCh38
+lengths, with a shared base-pair scale and cumulative Mb coordinates. Gene-rich
+chromosomes do not receive extra width. Expression colours extend between
+neighbouring gene midpoints, and CN colours between neighbouring inference
+markers; neither is extended beyond the first/last observed marker. Coincident
+genes are averaged for display. Haplotype fractions use their original genomic
+bins, with uncovered bins left blank. Grey marks areas without displayed data.
+For another assembly, pass its lengths in bp as `chromosome_sizes={...}` to
+`plot_summary()` or `plot_groups()`; default report exports target hg38/GRCh38.
+
 The same table builders drive Python inspection and disk exports. `.save()`
 writes tables, HDF5 results, PNG plots, the prepared counts and retained audits,
 using only the stored result. Original input files need not remain available.
