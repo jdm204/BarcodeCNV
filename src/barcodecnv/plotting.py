@@ -195,9 +195,24 @@ def plot_run(result, path=None, signal=None, *, genome="hg38", chromosome_sizes=
         layout="constrained",
         squeeze=False,
     )
-    stability = np.minimum(result.weighted["stability"], result.core["stability"])
+    cn_support = (
+        result.clone_calls is not None and result.clone_calls.method != "expression"
+    )
+    support_title = (
+        "Self/HF\nsupport\n0.5–1.0"
+        if cn_support and result.clone_calls.evidence.startswith("self_expression")
+        else "CN/HF\nsupport\n0.5–1.0"
+        if cn_support
+        else "Split\nstability\n0.5–1.0"
+    )
+    stability = (
+        result.clone_calls.stability.copy()
+        if cn_support
+        else np.minimum(result.weighted["stability"], result.core["stability"])
+    )
     if result.hf_stability is not None:
         stability = np.minimum(stability, result.hf_stability)
+    stability[result.groups == 0] = np.nan
     stability = stability[order]
     barcodes = [f"{data.barcodes[b]}  ({result.cells[b]} cells)" for b in order]
     for (ax, strip), (title, values, cmap, colorlabel, geometry) in zip(axes, panels):
@@ -223,12 +238,12 @@ def plot_run(result, path=None, signal=None, *, genome="hg38", chromosome_sizes=
         strip.imshow(
             stability[:, None],
             aspect="auto",
-            cmap="Greys",
+            cmap=plt.get_cmap("Greys").with_extremes(bad=MISSING_COLOR),
             vmin=0.5,
             vmax=1,
             interpolation="nearest",
         )
-        strip.set_title("Split\nstability\n0.5–1.0", fontsize=8)
+        strip.set_title(support_title, fontsize=8)
         strip.set_xticks([])
         strip.set_yticks([])
         for target in (ax, strip):

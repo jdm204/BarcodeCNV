@@ -22,6 +22,7 @@ from time import perf_counter
 import pandas as pd
 
 from .bundle import CellBundle, read_bundle, write_bundle
+from .clone_calling import DEFAULT_CLONE_METHOD, validate_clone_method
 from .depth_controls import DepthOptions
 from .expression import ExpressionInput, resolve_expression
 from .expression import from_10x as from_10x
@@ -308,7 +309,9 @@ def _validate_analysis(
     depth_family="pln",
     barcode_phase="joint",
     depth_outlier_probability=0.05,
+    clone_method=DEFAULT_CLONE_METHOD,
 ):
+    validate_clone_method(clone_method)
     if not isinstance(seed, int) or seed < 0:
         raise ValueError("seed must be a nonnegative integer")
     if any(not isinstance(x, int) or x < 1 for x in (permutations, bin_width, draws)):
@@ -348,6 +351,7 @@ def infer(
     barcode_phase="joint",
     skip_signal=False,
     cn_refinement=True,
+    clone_method=DEFAULT_CLONE_METHOD,
     hf_refinement=True,
 ) -> InferenceResult:
     """Infer from a PreparedResult, CellBundle, expression or count-file inputs.
@@ -355,6 +359,16 @@ def infer(
     Returns an InferenceResult with arrays, fits, diagnostics and provenance.
     Use result.plot_summary(), plot_groups() and plot_signal() for Figures,
     and result.save(out) to export a report later without recomputing inference.
+    clone_method selects mean_profile (default), mean_distance, draw_quantile,
+    or the original expression-first method, expression. self_expression and
+    self_expression_tree group self-centred expression; self_expression_hf
+    jointly groups it with phase-aligned HF. Their decisions do not use fitted
+    CN calls. self_expression_correlation compares profile shapes;
+    self_expression_hf_debiased corrects joint distances for measurement noise.
+    These experimental alternatives test for excess variation before splitting.
+    All methods share CN fitting for reports. Optional HF refinement
+    follows clone calling (the joint method already uses HF before that step). cn_refinement=False
+    bypasses the selected method and uses expression groups.
     A PreparedResult carries its fit/provenance into result.prepared.
     Omit out for in-memory results only (output_directory is None).
     With out, write the full report and completion/failure metadata.
@@ -423,6 +437,7 @@ def _analyse(
     barcode_phase="joint",
     skip_signal=False,
     cn_refinement=True,
+    clone_method=DEFAULT_CLONE_METHOD,
     hf_refinement=True,
 ):
     arguments = _arguments(locals())
@@ -436,6 +451,7 @@ def _analyse(
         depth_family=depth_family,
         barcode_phase=barcode_phase,
         depth_outlier_probability=depth_outlier_probability,
+        clone_method=clone_method,
     )
     source_paths = dict(
         matrix=matrix,
@@ -556,6 +572,7 @@ def _analyse(
                 draws=draws,
                 seed=seed,
                 cn_refinement=cn_refinement,
+                clone_method=clone_method,
                 hf_refinement=hf_refinement,
                 model=Model(depth_family=depth_family),
                 depth_options=DepthOptions(
@@ -641,6 +658,7 @@ def run_pipeline(
     barcode_phase="joint",
     skip_signal=False,
     cn_refinement=True,
+    clone_method=DEFAULT_CLONE_METHOD,
     hf_refinement=True,
 ) -> InferenceResult:
     """Compose preprocess() then infer(); setup() is a separate, explicit step.
@@ -670,6 +688,7 @@ def run_pipeline(
         depth_family=depth_family,
         barcode_phase=barcode_phase,
         depth_outlier_probability=depth_outlier_probability,
+        clone_method=clone_method,
     )
     out = Path(out).resolve() if out is not None else None
     preprocessing_out = out / "preprocessing" if out is not None else None
@@ -746,6 +765,7 @@ def run_pipeline(
             barcode_phase=barcode_phase,
             skip_signal=skip_signal,
             cn_refinement=cn_refinement,
+            clone_method=clone_method,
             hf_refinement=hf_refinement,
         )
         metadata.update(status="complete", stage="complete")

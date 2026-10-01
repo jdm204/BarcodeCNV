@@ -1,18 +1,24 @@
-"""Expression-first PBPC2 grouping with count-based CN/phase inference."""
+"""Count-based CN/phase inference with selectable clone calling."""
 
 import numpy as np
 import pandas as pd
 from numba import njit
-from scipy.cluster.hierarchy import leaves_list, linkage
-from scipy.spatial.distance import squareform
+from scipy.cluster.hierarchy import leaves_list
 
 from .bootstrap import bootstrap_features
+from .clone_calling import (
+    DEFAULT_CLONE_METHOD,
+    SELF_METHODS,
+    call_clones,
+    validate_clone_method,
+)
 from .depth_controls import DepthOptions
 from .fitting import FitOptions, fit_phase_and_dispersion, infer_barcodes
 from .group_calls import summarize_groups
 from .grouping import cluster, common_refinement, recursive_groups
 from .haplotypes import local_refinement, rolling_features
 from .model import STATES, Model
+from .self_clones import call_self_clones
 from .smoothing import infercnv_smoothing
 
 
@@ -31,73 +37,6 @@ def path_distances(paths):
     return result
 
 
-def refine_groups(distances, initial, cells, minimum_relative_separation=0.25):
-    """Existing cell-weighted broad-CN contrast rule; only subdivides groups."""
-    labels = np.zeros(len(initial), dtype=int)
-    audit = []
-    next_label = 0
-    for group in sorted(set(initial) - {0}):
-        ix = np.flatnonzero(initial == group)
-        if len(ix) < 2:
-            continue
-        d = distances[ix][:, ix]
-        n = cells[ix]
-        tree = linkage(squareform(d.mean(axis=2), checks=False), method="average")
-        members = {i: [i] for i in range(len(ix))}
-        records = {}
-
-        def average(pairs, n=n, d=d):
-            pairs = list(pairs)
-            return sum(n[a] * n[b] * d[a, b] for a, b in pairs) / sum(
-                n[a] * n[b] for a, b in pairs
-            )
-
-        def within(m):
-            return average((a, b) for j, b in enumerate(m) for a in m[:j])
-
-        for j, row in enumerate(tree):
-            node = j + len(ix)
-            left, right = map(int, row[:2])
-            a, b = members[left], members[right]
-            members[node] = a + b
-            eligible = min(len(a), len(b)) >= 2
-            lower = relative = None
-            if eligible:
-                between = average((aa, bb) for aa in a for bb in b)
-                delta = between - (within(a) + within(b)) / 2
-                lower = float(np.quantile(delta, 0.05))
-                relative = float(
-                    delta.mean() / max(between.mean(), np.finfo(float).eps)
-                )
-            supported = bool(
-                eligible and lower > 0 and relative >= minimum_relative_separation
-            )
-            records[node] = dict(
-                expression_group=int(group),
-                node=node,
-                left=left,
-                right=right,
-                n=len(a + b),
-                lower95=lower,
-                relative=relative,
-                accepted=supported,
-            )
-
-        def visit(node, ix=ix, records=records, members=members):
-            nonlocal next_label
-            if node >= len(ix):
-                audit.append(records[node])
-            if node >= len(ix) and records[node]["accepted"]:
-                visit(records[node]["left"])
-                visit(records[node]["right"])
-            else:
-                next_label += 1
-                labels[ix[members[node]]] = next_label
-
-        visit(2 * len(ix) - 2)
-    return labels, audit
-
-
 def run_pbpc(
     bundle,
     *,
@@ -105,12 +44,14 @@ def run_pbpc(
     draws=256,
     seed=42,
     cn_refinement=True,
+    clone_method=DEFAULT_CLONE_METHOD,
     hf_refinement=True,
     options=FitOptions(),
     model=Model(),
     depth_options=DepthOptions(),
     progress=lambda message: None,
 ):
+    validate_clone_method(clone_method)
     if replicates < 20:
         raise ValueError("at least 20 cell bootstraps are required")
     if draws < 0 or (cn_refinement and draws < 1):
@@ -151,42 +92,76 @@ def run_pbpc(
     labels = expression_groups.copy()
     audit = []
     distances = None
+    clone_calls = None
+    grouping_hf = None
+    usable_hf = (
+        len(bundle.loci) and float(((bundle.h1 + bundle.h2).T @ bundle.het).sum()) > 0
+    )
     if cn_refinement:
-        progress("Independent posterior CN paths and group refinement")
-        seeds = np.random.SeedSequence(seed).spawn(len(bundle.barcodes))
-        paths = np.empty(
-            (draws, len(bundle.barcodes), len(bundle.gene_ids)), dtype=np.uint8
+        if clone_method in SELF_METHODS:
+            progress("Self-centred expression clone calling")
+            if (
+                clone_method in ("self_expression_hf", "self_expression_hf_debiased")
+                and usable_hf
+            ):
+                grouping_hf = rolling_features(
+                    bundle,
+                    barcodes.pooled_fit.final_phase.phase,
+                    replicates=replicates,
+                    seed=seed,
+                    resampling_seed=seed,
+                )
+            clone_calls = call_self_clones(
+                features,
+                method=clone_method,
+                hf=grouping_hf,
+                weighted=weighted,
+                core=core,
+            )
+        else:
+            progress("Independent posterior CN paths and group refinement")
+            seeds = np.random.SeedSequence(seed).spawn(len(bundle.barcodes))
+            paths = np.empty(
+                (draws, len(bundle.barcodes), len(bundle.gene_ids)), dtype=np.uint8
+            )
+            classes = np.array([s.broad for s in STATES], dtype=np.uint8)
+            for b, (chain, key) in enumerate(zip(barcodes.posterior.chains, seeds)):
+                paths[:, b] = classes[
+                    chain.sample_paths(draws, key)[:, bundle.gene_markers]
+                ]
+            distances = path_distances(paths)
+            clone_calls = call_clones(
+                distances,
+                barcodes.classes[:, bundle.gene_markers],
+                features["cells"],
+                method=clone_method,
+                expression_groups=expression_groups,
+            )
+        labels, audit = clone_calls.groups, clone_calls.nodes
+        progress(
+            f"Clone calling ({clone_method}): {len(set(labels) - {0})} groups, {np.sum(labels == 0)} unresolved barcodes"
         )
-        classes = np.array([s.broad for s in STATES], dtype=np.uint8)
-        for b, (chain, key) in enumerate(zip(barcodes.posterior.chains, seeds)):
-            paths[:, b] = classes[
-                chain.sample_paths(draws, key)[:, bundle.gene_markers]
-            ]
-        distances = path_distances(paths)
-        labels, audit = refine_groups(distances, expression_groups, features["cells"])
     pre_hf_groups = labels.copy()
-    hf_features = None
+    hf_features = grouping_hf
     hf_audit = []
     hf_stability = None
     hf_status = "disabled" if not hf_refinement else "no_usable_allele_counts"
-    if (
-        hf_refinement
-        and len(bundle.loci)
-        and float(((bundle.h1 + bundle.h2).T @ bundle.het).sum()) > 0
-    ):
+    if hf_refinement and usable_hf:
         progress("Rolling haplotype fractions and local group refinement")
-        hf_features = rolling_features(
-            bundle,
-            barcodes.pooled_fit.final_phase.phase,
-            replicates=replicates,
-            seed=seed,
-        )
+        if hf_features is None:
+            hf_features = rolling_features(
+                bundle,
+                barcodes.pooled_fit.final_phase.phase,
+                replicates=replicates,
+                seed=seed,
+            )
         labels, hf_audit, hf_stability = local_refinement(
             hf_features["x"], hf_features["boot"], labels, return_stability=True
         )
+        hf_status = "applied"
+    if hf_features is not None:
         # Resampling arrays are temporary; retain only summaries for reporting.
         hf_features.pop("boot")
-        hf_status = "applied"
     # Use observed expression hierarchy within each reported group, with group
     # boundaries contiguous. No simulated truth enters ordering or grouping.
     order = np.arange(len(labels)) if tree is None else leaves_list(tree)
@@ -224,6 +199,7 @@ def run_pbpc(
         weighted=weighted,
         core=core,
         cn_audit=audit,
+        clone_calls=clone_calls,
         distances=distances,
         pre_hf_groups=pre_hf_groups,
         hf_features=hf_features,

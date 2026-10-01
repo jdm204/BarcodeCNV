@@ -79,6 +79,11 @@ def test_plots_and_export_reuse_results_and_leave_caller_figures_open(
         metadata = json.loads((out / "run.json").read_text())
         assert metadata["status"] == "complete"
         assert metadata["arguments"]["bootstraps"] == 20
+        assert metadata["clone_calling"]["method"] == "mean_profile"
+        assert (out / "clone_membership.csv").is_file()
+        table = fitted.clone_membership_table()
+        assert table.barcode.tolist() == list(fitted.bundle.barcodes)
+        np.testing.assert_array_equal(table.pre_hf_group, fitted.pre_hf_groups)
         sentinel = (out / "run.json").read_bytes()
         with pytest.raises(FileExistsError):
             fitted.save(out)

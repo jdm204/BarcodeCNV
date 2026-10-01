@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 
 from .bundle import CellBundle, write_bundle
+from .clone_calling import CloneCalls
 from .fitting import BarcodeFit
 from .group_calls import GroupCalls
 from .reference import FittedReference, write_fit
@@ -160,6 +161,7 @@ class InferenceResult:
     weighted: dict
     core: dict
     cn_audit: list
+    clone_calls: CloneCalls | None
     distances: np.ndarray | None
     pre_hf_groups: np.ndarray
     hf_features: dict | None
@@ -210,11 +212,27 @@ class InferenceResult:
                 expression_group=self.expression_groups,
                 phase_group=self.phase_groups,
                 pre_hf_group=self.pre_hf_groups,
+                clone_membership_support=self.clone_calls.stability
+                if self.clone_calls is not None
+                else np.full(len(self.groups), np.nan),
                 hf_stability=self.hf_stability,
                 weighted_stability=self.weighted["stability"],
                 core_stability=self.core["stability"],
             )
         )
+
+    def clone_membership_table(self) -> pd.DataFrame:
+        """Pre-HF membership decisions; references index the barcode axis.
+
+        Empty for the original expression-first method or disabled clone calling. Support measures
+        relative group preference, not absolute compatibility or clone probability.
+        """
+        if self.clone_calls is None or not self.clone_calls.membership:
+            return pd.DataFrame()
+        table = pd.DataFrame(self.clone_calls.membership)
+        table.insert(0, "barcode", self.bundle.barcodes)
+        table.insert(1, "pre_hf_group", self.pre_hf_groups)
+        return table
 
     def barcode_cn_table(self, barcode=None) -> pd.DataFrame:
         """Gene-level CN probabilities; optionally select one lineage barcode ID."""

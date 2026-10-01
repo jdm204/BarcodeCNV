@@ -33,6 +33,9 @@ def write_run(out, result):
     probabilities = fit.classes
     groups = result.groups_table()
     groups.to_csv(out / "groups.csv", index=False)
+    membership = result.clone_membership_table()
+    if not membership.empty:
+        membership.to_csv(out / "clone_membership.csv", index=False)
     pd.DataFrame(dict(barcode=np.array(bundle.barcodes)[result.order])).to_csv(
         out / "order.csv", index=False
     )
@@ -46,6 +49,19 @@ def write_run(out, result):
     write_cn_tables(out, bundle, probabilities, result.groups, calls)
     with h5py.File(out / "result.h5", "w") as f:
         f.attrs["barcodecnv_schema"] = "result-v1"
+        f.attrs["clone_method"] = (
+            result.clone_calls.method if result.clone_calls is not None else "disabled"
+        )
+        if result.clone_calls is not None:
+            for name in ("groups", "discovered", "anchors", "stability"):
+                f.create_dataset(
+                    "clone_calling/" + name, data=getattr(result.clone_calls, name)
+                )
+            f["clone_calling"].attrs["stage"] = "before optional HF refinement"
+            f["clone_calling"].attrs["evidence"] = result.clone_calls.evidence
+            f["clone_calling"].attrs["feature_info"] = json.dumps(
+                result.clone_calls.feature_info
+            )
         for name, value in asdict(fit.posterior.depth_options).items():
             f.attrs["depth_" + name] = value
         for key, values in (
@@ -148,8 +164,21 @@ def write_run(out, result):
         pooled_alpha=pooled.dispersion.parameters.alpha,
         barcode_alpha=fit.dispersion.parameters.alpha,
         dispersion_at_boundary=fit.dispersion.at_boundary,
-        groups=int(result.groups.max()),
+        groups=len(set(result.groups) - {0}),
         unresolved_barcodes=int(np.sum(result.groups == 0)),
+        clone_calling=dict(
+            method=result.clone_calls.method
+            if result.clone_calls is not None
+            else None,
+            status="applied" if result.clone_calls is not None else "disabled",
+            evidence=result.clone_calls.evidence
+            if result.clone_calls is not None
+            else "expression",
+            feature_info=result.clone_calls.feature_info
+            if result.clone_calls is not None
+            else {},
+            membership="pre-HF decisions; support is relative preference, not a clone probability",
+        ),
         model=asdict(fit.posterior.model),
         depth_options=asdict(fit.posterior.depth_options),
         hf_refinement=dict(
@@ -157,7 +186,7 @@ def write_run(out, result):
             window_bp=WINDOW_BP,
             stride_bp=BASE_BIN_BP,
             phase="conditional MAP",
-            groups_before=int(result.pre_hf_groups.max()),
+            groups_before=len(set(result.pre_hf_groups) - {0}),
         ),
         barcode_phase_method="joint"
         if fit.posterior.phase.ndim == 2
@@ -183,5 +212,5 @@ def write_run(out, result):
             if fit.posterior.phase.ndim == 2
             else "CN probabilities conditional on fitted phase/noise; "
         )
-        + "membership values are bootstrap stability, not clone posterior probabilities",
+        + "CN membership support and expression/HF bootstrap stability are not clone posterior probabilities",
     )

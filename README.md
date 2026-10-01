@@ -3,7 +3,7 @@
 BarcodeCNV is a CNV-calling tool designed for static-barcode lineage tracing single cell RNA sequencing.
 Here, static-barcode lineage tracing means transducing cells with inherited, expressed static nucleotide sequence barcodes (systems such as LARRY, CellTag, WILDseq, SPLINTR).
 
-BarcodeCNV uses static lineage barcodes to pool sparse single-cell RNA counts, identify supported groups of genetically similar barcodes, and estimate their copy-number alterations. The aim is to support genotype-phenotype analysis while leaving weakly supported memberships unresolved. Grouping starts from self-centred, InferCNV-style smoothed expression and uses recursive binary splitting, with whole-cell bootstraps to assess split support and membership stability. Count-based CN contrasts and local smoothed haplotype-fraction (HF) differences can further subdivide these groups. An external normal expression reference, supplied directly or fitted as a mixture of available normal profiles, supports CN calling. A default 5% CN-independent depth-outlier component limits the influence of individual genes inconsistent with that reference. A dual-signal hidden Markov model (HMM) combines unsmoothed expression counts and phased allele counts to report uncertain CN states for each barcode and for directly pooled cells within each final group. A permutation diagnostic separately tests for barcode-associated regional signal.
+BarcodeCNV uses static lineage barcodes to pool sparse single-cell RNA counts, identify supported groups of genetically similar barcodes, and estimate their copy-number alterations. The aim is to support genotype-phenotype analysis while leaving weakly supported memberships unresolved. Default clone calling discovers groups from inferred CN paths and checks membership against the spread of mean CN probability profiles. Local smoothed haplotype-fraction (HF) differences can further subdivide these groups. Self-centred, InferCNV-style smoothed expression supports phase pooling and diagnostics; the original expression-first grouping remains available as an explicit method. An external normal expression reference, supplied directly or fitted as a mixture of available normal profiles, supports CN calling. A default 5% CN-independent depth-outlier component limits the influence of individual genes inconsistent with that reference. A dual-signal hidden Markov model (HMM) combines unsmoothed expression counts and phased allele counts to report uncertain CN states for each barcode and for directly pooled cells within each final group. A permutation diagnostic separately tests for barcode-associated regional signal.
 
 # Quick Start
 
@@ -149,12 +149,75 @@ a positional prepared bundle or count-input options; combining them is rejected.
 Use `--help` on any command. `infer` and `run` default to 64 whole-cell bootstraps, 256
 independent CN paths and 199 signal permutations. `--skip-signal` and
 `--no-cn-refinement` omit those stages explicitly. Rolling haplotype-fraction
-refinement is enabled by default; `--no-hf-refinement` restores the previous
-expression/CN grouping. Use both refinement switches for expression-only
+refinement is enabled by default; `--no-hf-refinement` reports the selected
+clone method's groups directly. Use both refinement switches for expression-only
 reporting groups. `--phase-iterations` changes
 the fitting iteration limit; unconverged fits cannot report a completed result.
 Output directories/files must be new. Failed inference runs retain `run.json` with their
 failure status and any already completed diagnostic outputs.
+
+Choose clone calling with `clone_method` in `api.infer()` or `api.run_pipeline()`,
+or `--clone-method` in `infer` or `run`:
+
+| Method | Behaviour |
+|---|---|
+| `mean_profile` (default) | Discover CN groups below unsupported tree branches; assess membership against the 95th percentile of reference-member distances calculated from mean CN probability profiles. |
+| `mean_distance` | Same discovery and relative membership; stricter rejection against average within-reference distance. |
+| `draw_quantile` | Same discovery; calculate the reference-member 95th percentile separately on each posterior draw. More permissive in the evaluated private-CNA controls. |
+| `expression` | Original expression-first groups, subdivided by supported CN contrasts. |
+| `self_expression` | Existing self-centred expression recursive splitters, with no CN refinement. |
+| `self_expression_tree` | Self-centred expression distance tree with whole-cell bootstrap uncertainty and reference-member compatibility. |
+| `self_expression_hf` | Same tree method using self-centred expression jointly with phase-aligned HF, balanced by bootstrap noise. |
+| `self_expression_correlation` | Experimental shape-distance tree with a bootstrap excess-variation check before discovery. Discards overall amplitude. |
+| `self_expression_hf_debiased` | Experimental joint expression/HF tree correcting measurement-noise inflation, with the same excess-variation check. |
+
+```python
+result = api.infer(prepared, clone_method="mean_profile")
+result.clone_membership_table()  # Pre-HF membership decisions and reference indices.
+```
+
+```sh
+uv run barcodecnv infer prepared.h5 --out results --clone-method mean_profile
+```
+
+The first three methods group **CN profiles**. The `self_expression*` methods
+instead group self-centred smoothed expression, optionally jointly with HF;
+their decisions do not consume external-reference expression or fitted CN
+calls. The joint method retains the existing fitted phase alignment. All methods use
+the same barcode CN fit; optional HF refinement follows clone calling.
+`--no-cn-refinement` bypasses the selected method and uses expression groups.
+`result.clone_calls` contains the method, pre-HF groups, discovery/anchor groups,
+relative membership support and decision audits. Group IDs may have gaps;
+zero denotes unresolved membership. HF can subsequently split groups or leave
+additional barcodes unresolved. For evaluation of the self-centred methods,
+set `hf_refinement=False` to omit that subsequent refinement. The joint method
+still uses HF as an input to its initial grouping. If no allele counts are
+available it falls back to expression and records that in
+`result.clone_calls.feature_info`. Expression and HF use matching whole-cell
+bootstrap resamples; each modality is scaled to equal total bootstrap-noise
+energy. These remain evaluation alternatives: the first joint version performs
+less well than CN grouping on the inspected synthetic challenge. Correlation and
+measurement-noise correction recover more challenge barcodes, but still trail
+CN grouping and can be unstable on real data. They retain the original tree
+variants as baselines. The new variants retain one undivided group when the
+bootstrap detects no excess variation; membership support is then undefined.
+This is not evidence that all barcodes have the same clone. Noise correction can
+absorb weak private events, and correlation can hide dosage differences.
+See [the comparison report](benchmarks/grouping/SELF_REFINEMENT_RESULTS.org).
+
+Self centering removes external expression-reference mismatch from these
+grouping inputs, but can mistake expression programmes for CNA differences
+and cannot detect alterations shared across the cohort. Input gene selection
+and fitted HF phase remain conditioning assumptions. CN reports still use
+an external reference even when groups are called from self-centred data.
+
+The default needs at least three reference-member scores to estimate a local
+spread. Smaller groups borrow within-group scores from other anchored groups;
+if none are available, membership remains unresolved. In particular, a dataset
+containing only two barcodes cannot establish this compatibility baseline.
+These empirical thresholds are not calibrated clone probabilities. Compared
+with `mean_distance`, the default retains more RBL1 memberships but can absorb
+smaller private CNAs; see the [method evaluation](benchmarks/grouping/PROFILE_ENVELOPE_RESULTS.org).
 
 Poisson–lognormal depth and joint barcode CN/phase inference are the defaults.
 The two options can be varied independently; to reproduce the earlier NB and
@@ -249,7 +312,9 @@ additional legacy cell metadata is ignored.
   expression, rolling haplotype fraction (when available), and CN calls.
   All panels use the same barcode/genomic order with called
   group boundaries. CN saturation represents conditional state probability;
-  the separate strip shows the minimum expression/HF bootstrap split stability.
+  the separate strip shows the selected clone method's membership support (or expression split
+  stability for `expression`), combined with HF stability by taking the minimum.
+  Unresolved or unavailable values are grey; this is not a clone probability.
   Haplotype fractions are signed and centered across barcodes. Missing expression or HF coverage is
   white. No ground truth is used in this figure.
 * `signal.png`, `signal.json`, `signal_null.csv`: observed regional count
@@ -260,6 +325,12 @@ additional legacy cell metadata is ignored.
   denotes unresolved membership. `phase_group` is a separate pooling decision.
   `pre_hf_group` preserves the groups before HF refinement; `hf_stability` is
   the additional split stability (empty when HF refinement was skipped).
+  `clone_membership_support` is relative group preference or recursive split support, empty when unavailable.
+* `clone_membership.csv`: pre-HF membership decisions for the CN-based methods,
+  including rejection reasons and calibration references. Reference indices
+  refer to the barcode order in `groups.csv`. `result.h5` also stores the method,
+  pre-HF calls, discovery groups, anchors and support under `clone_calling`;
+  `run.json` records the selected method and whether clone calling ran.
 * `barcode_cn_genes.csv.gz`: barcode/group IDs, gene coordinates, marginal MAP
   class and the four class probabilities. Includes unresolved barcodes.
 * `group_cn_genes.csv.gz`: one row per resolved group and gene, with group size,
@@ -547,7 +618,8 @@ match the annotation and reference panel; duplicate IDs are rejected.
   `signal.py`: label-blind features and permutation calibration;
   `bootstrap.py`/`grouping.py`: the existing PBPC2 expression decision rules;
   `haplotypes.py`: count-weighted rolling HF features and local splitting;
-  `workflow.py`: orchestration and cell-weighted CN refinement;
+  `clone_calling.py`: shared CN discovery, selectable membership rules and the original expression-first refinement;
+  `workflow.py`: orchestration;
   `plotting.py`/`cli.py`: presentation and filesystem output.
 
 The count-inference entry points can also be used separately:
@@ -576,7 +648,7 @@ paths = posterior.sample_paths(draws=256, seed=42)
 `PreparedCounts` already contains expected diploid counts and genetic positions.
 Those low-level calls do not group or pool cells. `CellBundle.prepared()` performs
 explicit pseudobulking, and `barcodecnv.workflow.run_pbpc` owns the complete
-expression-first orchestration. The smoothing port follows InferCNV 1.28.0
+inference orchestration. The smoothing port follows InferCNV 1.28.0
 through step 14 and is checked against independently generated R fixtures.
 
 ## Preprocessing Cell Ranger outputs

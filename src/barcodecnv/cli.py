@@ -9,6 +9,7 @@ from pathlib import Path
 import numpy as np
 
 from . import api
+from .clone_calling import CLONE_METHODS, DEFAULT_CLONE_METHOD
 from .depth_controls import DepthOptions
 from .preprocessing import add_arguments as add_preprocessing_arguments
 from .reference import add_reference_arguments
@@ -112,6 +113,12 @@ def add_analysis_options(command, *, inference, seed=True):
         type=positive,
         default=256,
         help="independent CN paths for refinement",
+    )
+    command.add_argument(
+        "--clone-method",
+        choices=CLONE_METHODS,
+        default=DEFAULT_CLONE_METHOD,
+        help="clone calling rule (default: mean_profile); expression retains the original expression-first method",
     )
     command.add_argument("--phase-iterations", type=positive, default=60)
     command.add_argument(

@@ -11,10 +11,10 @@ from scipy.sparse import csc_matrix
 from barcodecnv import Grid, Loci
 from barcodecnv.bundle import CellBundle, read_bundle, write_bundle
 from barcodecnv.cli import main
+from barcodecnv.clone_calling import refine_groups
 from barcodecnv.loading import load_cells
 from barcodecnv.signal import barcode_signal_test
 from barcodecnv.smoothing import infercnv_smoothing
-from barcodecnv.workflow import refine_groups
 
 
 def example_bundle():
@@ -142,6 +142,8 @@ def test_cli_signal_and_full_pipeline(tmp_path, family, phase):
             phase,
             "--depth-outlier-probability",
             "0.01",
+            "--clone-method",
+            "expression",
         ]
         if family == "nb"
         else []
@@ -178,6 +180,8 @@ def test_cli_signal_and_full_pipeline(tmp_path, family, phase):
     )
     assert metadata["phase_converged"] and metadata["status"] == "complete"
     assert metadata["hf_refinement"]["status"] == "no_usable_allele_counts"
+    method = "expression" if family == "nb" else "mean_profile"
+    assert metadata["clone_calling"]["method"] == method
     with h5py.File(out / "result.h5") as f:
         assert f.attrs["depth_outlier_probability"] == epsilon
         assert f["group_calls"].attrs["depth_outlier_probability"] == epsilon
@@ -186,7 +190,15 @@ def test_cli_signal_and_full_pipeline(tmp_path, family, phase):
         assert p[:, :, 0][:, 40:].mean() > 0.9
         pooled = f["group_calls/pooled"][:]
         assert pooled.shape[0] == 2
-        assert pooled[0, :20, 1].mean() > 0.9 and pooled[1, 20:40, 1].mean() > 0.9
+        # Group numbers are arbitrary; use exported membership to locate each pool.
+        group_ids = f["group_calls/groups"][:]
+        left = np.flatnonzero(group_ids == groups.group.iloc[0])[0]
+        right = np.flatnonzero(group_ids == groups.group.iloc[-1])[0]
+        assert (
+            pooled[left, :20, 1].mean() > 0.9 and pooled[right, 20:40, 1].mean() > 0.9
+        )
+        assert f.attrs["clone_method"] == method
+        np.testing.assert_array_equal(f["clone_calling/groups"][:], groups.pre_hf_group)
         exported = pd.read_csv(out / "group_cn_genes.csv.gz")
         np.testing.assert_allclose(
             exported.pooled_p_gain.to_numpy(), pooled[:, :, 1].ravel()

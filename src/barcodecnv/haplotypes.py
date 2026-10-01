@@ -49,7 +49,9 @@ def region_counts(bundle, phase, width=10_000_000):
     )
 
 
-def features_from_counts(a, b, membership, B, *, replicates=64, seed=42, smoother=None):
+def features_from_counts(
+    a, b, membership, B, *, replicates=64, seed=42, smoother=None, resampling_seed=None
+):
     if replicates < 20:
         raise ValueError("at least 20 whole-cell bootstrap replicates are required")
     membership = np.asarray(membership)
@@ -64,6 +66,11 @@ def features_from_counts(a, b, membership, B, *, replicates=64, seed=42, smoothe
     if any(len(ix) == 0 for ix in members):
         raise ValueError("every barcode needs observed cells")
     rng = np.random.default_rng(seed)
+    cell_rng = rng
+    if resampling_seed is not None:
+        # Match expression's cell draws without beta draws advancing that stream.
+        cell_rng = np.random.default_rng(resampling_seed)
+        rng = np.random.default_rng(np.random.SeedSequence(seed).spawn(1)[0])
     aa = aggregate_cells(a, members)
     bb = aggregate_cells(b, members)
     x = (
@@ -73,7 +80,7 @@ def features_from_counts(a, b, membership, B, *, replicates=64, seed=42, smoothe
     )
     boot = []
     for _ in range(replicates):
-        samples = [rng.choice(ix, len(ix), replace=True) for ix in members]
+        samples = [cell_rng.choice(ix, len(ix), replace=True) for ix in members]
         aa = aggregate_cells(a, samples)
         bb = aggregate_cells(b, samples)
         theta = rng.beta(aa + 0.5, bb + 0.5)
@@ -106,7 +113,7 @@ def window_smoother(regions, radius=2):
     )
 
 
-def rolling_features(bundle, phase, *, replicates=64, seed=42):
+def rolling_features(bundle, phase, *, replicates=64, seed=42, resampling_seed=None):
     """10 Mb boxcar on 2 Mb base bins, never crossing chromosomes.
 
     Nearby output windows share base-bin beta draws; they are not independent
@@ -123,6 +130,7 @@ def rolling_features(bundle, phase, *, replicates=64, seed=42):
         replicates=replicates,
         seed=seed,
         smoother=smoother,
+        resampling_seed=resampling_seed,
     )
     membership = bundle.membership
     coverage = smoother @ aggregate_cells(
