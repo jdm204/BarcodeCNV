@@ -163,7 +163,7 @@ or `--clone-method` in `infer` or `run`:
 |---|---|
 | `mean_profile` (default) | Discover CN groups below unsupported tree branches; assess membership against the 95th percentile of reference-member distances calculated from mean CN probability profiles. |
 | `mean_distance` | Same discovery and relative membership; stricter rejection against average within-reference distance. |
-| `draw_quantile` | Same discovery; calculate the reference-member 95th percentile separately on each posterior draw. More permissive in the evaluated private-CNA controls. |
+| `draw_quantile` | Same discovery; calculate the reference-member 95th percentile separately on each posterior draw. |
 | `expression` | Original expression-first groups, subdivided by supported CN contrasts. |
 | `self_expression` | Existing self-centred expression recursive splitters, with no CN refinement. |
 | `self_expression_tree` | Self-centred expression distance tree with whole-cell bootstrap uncertainty and reference-member compatibility. |
@@ -195,29 +195,36 @@ still uses HF as an input to its initial grouping. If no allele counts are
 available it falls back to expression and records that in
 `result.clone_calls.feature_info`. Expression and HF use matching whole-cell
 bootstrap resamples; each modality is scaled to equal total bootstrap-noise
-energy. These remain evaluation alternatives: the first joint version performs
-less well than CN grouping on the inspected synthetic challenge. Correlation and
-measurement-noise correction recover more challenge barcodes, but still trail
-CN grouping and can be unstable on real data. They retain the original tree
-variants as baselines. The new variants retain one undivided group when the
-bootstrap detects no excess variation; membership support is then undefined.
+energy. The correlation and measurement-noise-corrected variants retain one
+undivided group when the bootstrap detects no excess variation; membership
+support is then undefined.
 This is not evidence that all barcodes have the same clone. Noise correction can
 absorb weak private events, and correlation can hide dosage differences.
-See [the comparison report](benchmarks/grouping/SELF_REFINEMENT_RESULTS.org).
 
-Self centering removes external expression-reference mismatch from these
-grouping inputs, but can mistake expression programmes for CNA differences
-and cannot detect alterations shared across the cohort. Input gene selection
-and fitted HF phase remain conditioning assumptions. CN reports still use
-an external reference even when groups are called from self-centred data.
+Choose a grouping method with your reference's study, assay and cell-state
+coverage in mind. The default CN-based method is a reasonable starting point
+with a well-matched reference. Reference mismatch can distort its CN profiles
+and cause both false splits and false merges. Self-centred methods can preserve
+clone information under that mismatch, but may mistake expression programmes
+for CNA differences or merge clones with weak differences. Inspect smoothed
+expression and HF together when assessing a proposed split: similar expression
+alone does not rule out a difference in allelic balance.
+
+Self centering removes external expression-reference mismatch from the
+expression grouping inputs and cannot detect alterations shared across the
+cohort. Input gene selection and fitted HF phase remain conditioning assumptions.
+It does not repair absolute CN calls: CN reports still use an external reference
+even when groups are called from self-centred data. Agreement between methods
+indicates stability to that choice, not a calibrated probability of correctness;
+methods can share false merges.
 
 The default needs at least three reference-member scores to estimate a local
 spread. Smaller groups borrow within-group scores from other anchored groups;
 if none are available, membership remains unresolved. In particular, a dataset
 containing only two barcodes cannot establish this compatibility baseline.
-These empirical thresholds are not calibrated clone probabilities. Compared
-with `mean_distance`, the default retains more RBL1 memberships but can absorb
-smaller private CNAs; see the [method evaluation](benchmarks/grouping/PROFILE_ENVELOPE_RESULTS.org).
+These empirical thresholds are not calibrated clone probabilities. The default
+can absorb smaller private CNAs into an existing group rather than leaving them
+unresolved.
 
 Poisson–lognormal depth and joint barcode CN/phase inference are the defaults.
 The two options can be varied independently; to reproduce the earlier NB and
@@ -766,8 +773,8 @@ files, including Python code blocks in Markdown. If files change, review and
 stage the fixes, then commit again. The hooks use the Ruff version in `uv.lock`,
 matching CI. To check all tracked files, run `uv run pre-commit run --all-files`.
 
-Ruff owns formatting, import sorting and linting for the package, tests, figure
-scripts and validation scripts. Configuration lives in `pyproject.toml`, targeting
+Ruff owns formatting, import sorting and linting for the package, tests and bundled
+figure scripts. Configuration lives in `pyproject.toml`, targeting
 Python 3.13 with Ruff's default formatting style. To apply safe lint fixes and format:
 
 ```sh
