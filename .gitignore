@@ -16,3 +16,8 @@ __pycache__/
 
 # Historical local port validation; not part of the standalone release.
 /validation/
+
+# Local experiments, datasets and generated analysis outputs.
+/benchmarks/
+/exampledata/
+/tutorial-results/
